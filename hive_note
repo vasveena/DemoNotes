@@ -1,0 +1,177 @@
+Demo 1.0 - Create EMR cluster with Hive and JSON configurations (AWS Glue Data Catalog)
+
+[{
+	"classification": "hive",
+	"properties": {
+		"hive.llap.enabled": "true"
+	},
+	"configurations": []
+}, {
+	"classification": "hive-site",
+	"properties": {
+		"hive.metastore.client.factory.class": "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory"
+	},
+	"configurations": []
+}]
+
+Demo 1.1 - Run queries on top of S3
+
+You can use beeline or CLI
+
+!connect jdbc:hive2://ip-172-31-78-42.ec2.internal:10000/default
+
+drop table if exists testdb.wikistats_orc;
+
+CREATE EXTERNAL TABLE testdb.wikistats_orc
+(language STRING, page_title STRING,
+hits BIGINT, retrived_size BIGINT)
+STORED AS ORC
+LOCATION 's3://vasveena-test-presto/orc/';
+
+select sum(hits) as sumOfHits, page_title
+from testdb.wikistats_orc
+group by page_title
+order by sumOfHits;
+
+select count(*) from testdb.lineitem
+where l_shipdate='1992-01-04' and l_suppkey=1002386;
+
+select count(*) from testdb.lineitempart
+where l_shipdate = '1994-02-17' and l_suppkey=2206129
+
+select count(*) from testdb.lineitembucketedpart
+where l_shipdate = '1994-02-17' and l_suppkey=2206129
+
+CREATE EXTERNAL TABLE `testdb.lineitembucketedinsert`(
+  `l_orderkey` string,
+  `l_linenumber` bigint,
+  `l_quantity` bigint,
+  `l_extendedprice` double,
+  `l_discount` double)
+PARTITIONED BY (`l_shipdate` string)
+CLUSTERED BY (l_linenumber)
+SORTED BY (l_linenumber ASC)
+INTO 10 BUCKETS
+STORED AS PARQUET
+LOCATION 's3://vasveena-test-demo/bigtpcparq/lineitembucketedinsert';
+
+set hive.exec.dynamic.partition.mode=nonstrict
+
+INSERT OVERWRITE TABLE testdb.lineitembucketedinsert partition (l_shipdate) select l_orderkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_shipdate from testdb.lineitembucketedpart limit 100000;
+
+Demo 1.2 - Run query on DynamoDB table
+
+CREATE EXTERNAL TABLE change_control_table (
+    database_name string,
+    partition_path string,
+    record_key string,
+    source_ordering_fld string,
+    source_schema string,
+    table_name string,
+    target_schema string
+)
+STORED BY 'org.apache.hadoop.hive.dynamodb.DynamoDBStorageHandler'
+TBLPROPERTIES (
+    "dynamodb.table.name" = "ChangeControlTable",
+    "dynamodb.column.mapping" =
+        "database_name:databaseName,partition_path:partitionPath,record_key:recordKey,source_ordering_fld:sourceOrderingField,source_schema:sourceSchema,table_name:tableName,target_schema:targetSchema");
+
+select * from change_control_table;
+
+Demo 1.5 - Run query using EMR Steps
+
+aws emr add-steps --cluster-id j-30ZUAR599JRIV --steps Type=Hive,Name="Hive Job",ActionOnFailure=CONTINUE,Args=[-f,s3://elasticmapreduce/samples/hive-ads/libs/response-time-stats.q,-d,INPUT=s3://elasticmapreduce/samples/hive-ads/tables,-d,OUTPUT=s3://mybucket/hive-ads/output/,-d,SAMPLE=s3://elasticmapreduce/samples/hive-ads/]
+
+Demo 1.6 - Run query using Hue notebooks and JDBC
+
+ssh -o ServerAliveInterval=10 -i ~/hadp.pem -N -L 10000:localhost:10000 hadoop@ec2-18-234-107-4.compute-1.amazonaws.com
+jdbc:hive2://localhost:10000/default
+
+Demo 1.7 - Run query using EMR Persistent Notebooks (parameterized)
+
+aws s3 ls s3://amazon-reviews-pds/parquet/product_category
+
+Demo 1.8 - Run Hive batch jobs using AWS Step Functions and Amazon MWAA
+
+Demo 1.9 - EMR Serverless
+
+Demo 1.10 - Run ACID queries
+
+A single statement can write to multiple partitions or multiple tables. If the operation fails, partial writes or inserts are not visible to users. Operations remain performant even if data changes often, such as one percent per hour. Does not overwrite the entire partition to perform update or delete operations.
+
+set hive.support.concurrency=true;
+set hive.exec.dynamic.partition.mode=nonstrict;
+set hive.txn.manager=org.apache.hadoop.hive.ql.lockmgr.DbTxnManager;
+
+CREATE TABLE acid_tbl
+(
+  key INT,
+  value STRING,
+  action STRING
+)
+--PARTITIONED BY (trans_date DATE)
+CLUSTERED BY (key) INTO 3 BUCKETS
+STORED AS ORC
+LOCATION 's3://vasveena-test-demo/hive/acid_tbl'
+TBLPROPERTIES ('transactional'='true');
+
+INSERT INTO acid_tbl VALUES
+(1, 'val1', 'insert'),
+(2, 'val2', 'insert'),
+(3, 'val3', 'insert'),
+(4, 'val4', 'insert'),
+(5, 'val5', 'insert');
+
+SELECT * FROM acid_tbl;
+
+UPDATE acid_tbl SET value = 'val5_1', action = 'update' WHERE key = 5;
+SELECT * FROM acid_tbl;
+
+DELETE FROM acid_tbl WHERE key = 4;
+SELECT * FROM acid_tbl;
+
+DROP TABLE IF EXISTS acid_merge;
+CREATE TABLE acid_merge
+(
+  key INT,
+  new_value STRING
+)
+STORED AS ORC;
+
+INSERT INTO acid_merge VALUES
+(1, 'val1_1'),
+(3, NULL),
+(6, 'val6');
+
+MERGE INTO acid_tbl AS T
+USING acid_merge AS M
+ON T.key = M.key
+WHEN MATCHED AND M.new_value IS NOT NULL
+  THEN UPDATE SET value = M.new_value, action = 'merge_update'
+WHEN MATCHED AND M.new_value IS NULL
+  THEN DELETE
+WHEN NOT MATCHED
+  THEN INSERT VALUES (M.key, M.new_value, 'merge_insert');
+
+SELECT * FROM acid_tbl;
+
+ALTER TABLE acid_tbl COMPACT 'minor';
+SHOW COMPACTIONS;
+
+SET hive.compactor.check.interval;
+
+ALTER TABLE acid_tbl COMPACT 'major';
+show compactions;
+
+select row__id, key, value, action from acid_tbl;
+
+hive --service llapstatus
+
+http://coretask-public-dns-name:15002	Shows the overview of heap, cache, executor and system metrics
+http://coretask-public-dns-name:15002/conf	Shows the current LLAP configuration
+http://coretask-public-dns-name:15002/peers	Shows the details of LLAP nodes in the cluster extracted from the Zookeeper server
+http://coretask-public-dns-name:15002/iomem	Shows details about the cache contents and usage
+http://coretask-public-dns-name:15002/jmx	Shows the LLAP daemon’s JVM metrics
+http://coretask-public-dns-name:15002/stacks	Shows JVM stack traces of all threads
+http://coretask-public-dns-name:15002/conflog	Shows the current log levels
+http://coretask-public-dns-name:15002/status	Shows the status of LLAP
