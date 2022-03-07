@@ -128,11 +128,13 @@ WHERE "address"."state" = 'CA'
 and "cc"."type" = 'visa'
 GROUP BY "address"."city";
 
-Create index on state and cc-type columns and will include PK, city, expire, phone number columns in the index as well to prevent having to get it from the data table
-
-CREATE INDEX "my_index" ON "customer" ("address"."state","cc"."type") INCLUDE(pk, "address"."city","contact"."phone");
+Create local index on state and cc-type columns
 
 CREATE LOCAL INDEX "my_local_index" ON "customer" ("address"."state","cc"."type");
+
+Create global index on state and cc-type columns and include PK, city and phone number columns in the index as well to prevent having to get it from the data table
+
+CREATE INDEX "my_global_index" ON "customer" ("address"."state","cc"."type") INCLUDE(pk, "address"."city","contact"."phone");
 
 select * from "my_local_index" limit 10;
 
@@ -150,7 +152,7 @@ CREATE LOCAL INDEX "upper_idx" ON "customer" (UPPER("address"."state"||' '||"add
 
 select * from "customer" where (UPPER("address"."state"||' '||"address"."city")) = 'CA WEST RHEA';
 
-DROP INDEX "my_index" ON "customer";
+DROP INDEX "my_global_index" ON "customer";
 DROP INDEX "my_local_index" on "customer";
 DROP INDEX "upper_idx" on "customer";
 drop table "customer";
