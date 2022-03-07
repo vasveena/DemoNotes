@@ -1,0 +1,257 @@
+1) Create HBase table
+sudo -su hbase chmod -R 777 /var/log/hbase/hbase.log
+sudo -su hbase chmod -R 777 /var/log/hbase/SecurityAuth.audit
+
+hbase shell
+>> create 'customer', 'address', 'cc', 'contact'
+
+2) Restore snapshot from an existing table
+
+sudo su hbase -s /bin/sh -c 'hbase snapshot export -D hbase.rootdir=s3://us-east-1.elasticmapreduce.samples/hbase-demo-customer-data/snapshot -snapshot customer_snapshot1 -copy-to hdfs://`hostname -f`:8020/user/hbase -mappers 20 -chuser hbase -chmod 700'
+
+3) Restore HBase snapshot
+
+hbase shell
+>> disable 'customer'
+>> restore_snapshot 'customer_snapshot1'
+>> enable 'customer'
+
+4) Run queries
+
+Get all the data on a specific customer
+get 'customer', 'armstrong_zula_8570365786'
+
+Get all the address data from the address column family for a specific customer
+get 'customer', 'armstrong_zula_8570365786', {COLUMN => 'address'}
+
+Get credit card type for a specific customer
+get 'customer', 'armstrong_zula_8570365786', 'cc:type'
+
+Get all customers that use a Visa credit card
+scan 'customer', { COLUMNS => 'cc:type',  FILTER => "ValueFilter( =, 'binaryprefix:visa' )" }
+
+Get all the cities for each row that has a customer with a last name starting with “armstrong”
+scan 'customer', {STARTROW => 'armstrong_', ENDROW => 'armstronh', COLUMN => 'address:city'}
+
+List regions in HDFS
+
+hdfs dfs -ls /user/hbase/
+
+hdfs dfs -ls /user/hbase/data/default/customer/
+
+hdfs dfs -copyToLocal /user/hbase/data/default/customer/0f173cc3b25f7c6d4ff875f330c4e460/address/a307f63a72a54166925483420c28a1f8 /mnt/
+
+head /mnt/a307f63a72a54166925483420c28a1f8
+
+5) Go to Hue browser and use the search box to scan HBase for 100 records with the rowkey prefix "abbott" and return the credit card type and state
+
+abbott* +100 [cc:type,address:state]
+smith* +100 [cc:type,address:state]
+
+6) Run queries using Hive editor
+
+hdfs dfs -chmod 777 /user
+
+drop table if exists customer;
+
+CREATE EXTERNAL TABLE customer
+(rowkey STRING,
+street STRING,
+city STRING,
+state STRING,
+zip STRING,
+cctype STRING,
+ccnumber STRING,
+ccexpire STRING,
+phone STRING)
+STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'
+WITH SERDEPROPERTIES ('hbase.columns.mapping' = ':key,address:street,address:city,address:state,address:zip,cc:type,cc:number,cc:expire,contact:phone', 'hbase.scan.cacheblocks' = 'false', 'hbase.scan.cache' = '1000')
+TBLPROPERTIES ('hbase.table.name' = 'customer');
+
+SET mapreduce.map.memory.mb=2000;
+SET mapreduce.map.java.opts=-Xmx1500m;
+
+SELECT count (rowkey) FROM customer;
+
+SELECT cctype, count(rowkey) AS count
+FROM customer
+WHERE state = 'CA'
+GROUP BY cctype;
+
+drop table if exists StateInfo;
+
+CREATE EXTERNAL TABLE StateInfo(
+StateName STRING,
+Abbr STRING,
+Name STRING,
+Affiliation STRING)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+location 's3://us-east-1.elasticmapreduce.samples/hbase-demo-customer-data/state-data/';
+
+SELECT cctype, statename, count(rowkey)
+FROM customer c
+JOIN stateinfo s ON (c.state = s.abbr)
+GROUP BY cctype, statename;
+
+SELECT name, max(affiliation) AS affiliation, count(rowkey) as rowkeycount
+FROM customer c
+JOIN stateinfo s ON (c.state = s.abbr)
+WHERE cctype = 'visa'
+GROUP BY name;
+
+7) Run queries using Phoenix
+
+/usr/lib/phoenix/bin/sqlline-thin.py http://localhost:8765
+
+CREATE TABLE "customer" (
+pk VARCHAR PRIMARY KEY,
+"address"."state" VARCHAR,
+"address"."street" VARCHAR,
+"address"."city" VARCHAR,
+"address"."zip" VARCHAR,
+"cc"."number" VARCHAR,
+"cc"."expire" VARCHAR,
+"cc"."type" VARCHAR,
+"contact"."phone" VARCHAR)
+COLUMN_ENCODED_BYTES=0;
+
+!tables
+!describe "customer"
+
+select * from "customer" limit 10;
+
+SELECT "address"."city", count(pk) AS count
+FROM "customer"
+WHERE "address"."state" = 'CA'
+and "cc"."type" = 'visa'
+GROUP BY "address"."city";
+
+Create index on state and cc-type columns and will include PK, city, expire, phone number columns in the index as well to prevent having to get it from the data table
+
+CREATE INDEX "my_index" ON "customer" ("address"."state","cc"."type") INCLUDE(pk, "address"."city","contact"."phone");
+
+CREATE LOCAL INDEX "my_local_index" ON "customer" ("address"."state","cc"."type");
+
+select * from "my_local_index" limit 10;
+
+SELECT "address"."city", count(pk) AS count
+FROM "customer"
+WHERE "address"."state" = 'CA'
+and "cc"."type" = 'visa'
+GROUP BY "address"."city";
+
+select * from "customer" where (UPPER("address"."state"||' '||"address"."city")) = 'CA WEST RHEA';
+
+You can also create index on arbitary expressions
+Eg:
+CREATE LOCAL INDEX "upper_idx" ON "customer" (UPPER("address"."state"||' '||"address"."city"));
+
+select * from "customer" where (UPPER("address"."state"||' '||"address"."city")) = 'CA WEST RHEA';
+
+DROP INDEX "my_index" ON "customer";
+DROP INDEX "my_local_index" on "customer";
+DROP INDEX "upper_idx" on "customer";
+drop table "customer";
+
+You can also create table with salts for skewed rowkeys
+
+CREATE TABLE "customer" (
+pk VARCHAR PRIMARY KEY,
+"address"."state" VARCHAR,
+"address"."street" VARCHAR,
+"address"."city" VARCHAR,
+"address"."zip" VARCHAR,
+"cc"."number" VARCHAR,
+"cc"."expire" VARCHAR,
+"cc"."type" VARCHAR,
+"contact"."phone" VARCHAR)
+SALT_BUCKETS=20;
+
+8) See HBase UI and Ganglia
+
+Demo 2 - HBase on S3
+
+1) Create HBase table
+sudo -su hbase chmod -R 777 /var/log/hbase/hbase.log
+sudo -su hbase chmod -R 777 /var/log/hbase/SecurityAuth.audit
+
+hbase shell
+>> disable 'customer'
+>> drop 'customer'
+>> delete_snapshot 'customer_snapshot1'
+>> create 'customer', 'address', 'cc', 'contact'
+
+2) Restore snapshot from an existing table
+
+sudo su hbase -s /bin/sh -c 'hbase snapshot export -D hbase.rootdir=s3://us-east-1.elasticmapreduce.samples/hbase-demo-customer-data/snapshot -snapshot customer_snapshot1 -copy-to s3://vasveena-test-base-east/ -mappers 20 -chuser hbase -chmod 700'
+
+3) Restore HBase snapshot
+
+hbase shell
+>> disable 'customer'
+>> restore_snapshot 'customer_snapshot1'
+>> enable 'customer'
+
+4) Run queries
+
+Get all the data on a specific customer
+get 'customer', 'armstrong_zula_8570365786'
+
+5) Query this table in Hue, Hive, Phoenix similar to HDFS
+hdfs dfs -chmod 777 /user
+Abbott* +100 [cc:type,address:state]
+
+6) Inspect HBase UI and S3 regions
+
+Demo 3 - YCSB Benchmark
+
+1) Launch an EC2 instance
+
+2) Install ycsb with the help of Github deployment instructions
+https://github.com/brianfrankcooper/YCSB
+
+curl -O --location https://github.com/brianfrankcooper/YCSB/releases/download/0.17.0/ycsb-0.17.0.tar.gz
+tar xfvz ycsb-0.17.0.tar.gz
+
+3) Choose appropriate workflow to simulate your environment
+ls -l ycsb-0.17.0/workloads/
+
+4) Change the workload config file
+vi ycsb-0.17.0/workloads/workloada
+
+Payload size of ycsb from 1 KB to your production table payload size
+		fieldlength=1000000
+
+Can also change read/write/insert/scan proportions
+readproportion=0.5
+updateproportion=0.5
+
+5) Copy HBase conf from EMR on S3 or HDFS
+scp -i ~/hadp.pem -r hadoop@ec2-100-26-231-25.compute-1.amazonaws.com:/etc/hbase/conf/ ~/conf/ -> HDFS
+
+scp -i ~/hadp.pem -r hadoop@ec2-100-26-215-225.compute-1.amazonaws.com:/etc/hbase/conf/ ~/conf/ -> S3
+
+6) Create "usertable" in HBase shell
+
+n_splits = 200
+create 'usertable', 'family', {SPLITS => (1..n_splits).map {|i| "user#{1000+i*(9999-1000)/n_splits}"}}
+
+7) Run hbase-loadtest.sh
+
+$ cat hbase-loadtest.sh
+recordcount=32000000
+parallelism=12
+insertcount=$((recordcount/parallelism))
+for (( i=0; i<$parallelism; i++))
+do
+	ycsb-0.17.0/bin/ycsb load hbase14 -P ycsb-0.17.0/workloads/workloada -cp conf -p table=usertable -p columnfamily=family -p recordcount=$recordcount -threads 50 -p insertstart=$((i*insertcount)) -p insertcount=$insertcount > rn$i.out 2>&1 &
+done
+
+sh hbase-loadtest.sh
+
+8) Check read/write throughput
+sar -n DEV 1 3
+
+9) Inspect HBase UI and S3 files
