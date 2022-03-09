@@ -1,0 +1,217 @@
+STEP 1 - Install the AWS CLI
+
+pip3 install awscli --upgrade --user
+
+STEP 2 - Install eksctl and kubectl
+
+eksctl is a simple CLI tool for creating and managing clusters on EKS.
+kubectl - Kubernetes uses a command line utility called kubectl for communicating with the cluster API server.
+
+Install eksctl if not already installed - https://docs.aws.amazon.com/eks/latest/userguide/eksctl.html
+
+kubectl version --short --client
+
+Install kubectl if not installed - https://docs.aws.amazon.com/eks/latest/userguide/install-kubectl.html
+
+STEP 3 - Set up Amazon EKS cluster
+
+eksctl create cluster \
+--name EmrOnEKSDemo \
+--region us-west-2 \
+--with-oidc \
+--ssh-access \
+--ssh-public-key oregon \
+--instance-types=r4.8xlarge \
+--managed
+
+2022-03-01 20:25:00 [✔]  EKS cluster "EmrOnEKSDemo" in "us-west-2" region is ready
+
+kubectl get nodes -o wide
+kubectl get pods --all-namespaces -o wide
+
+STEP 4 - Enable cluster access for Amazon EMR on EKS (RBAC)
+
+So EMR service can launch pods on this service
+
+kubectl create namespace emroneks-demo
+
+eksctl create iamidentitymapping \
+    --cluster EmrOnEKSDemo \
+    --namespace emroneks-demo2 \
+    --service-name "emr-containers" \
+    --region us-west-2
+
+kubectl edit cm aws-auth -n kube-system
+
+STEP 5 - Create OIDC for EKS (IRSA - IAM role for service account)
+
+IAM Roles for Service Accounts (IRSA) is a feature of AWS which allows you to make use of IAM roles at the pod level by combining an OpenID Connect (OIDC) identity provider and Kubernetes service account annotations.
+
+When using eksctl, this part is already done. Let us verify this.
+
+aws eks describe-cluster --name EmrOnEKSDemo --query "cluster.identity.oidc.issuer" --output text --region us-west-2
+
+STEP 6 - Create a Job execution role
+
+Create an IAM role for EC2 with the below policy:
+
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:ListBucket"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "logs:PutLogEvents",
+                "logs:CreateLogStream",
+                "logs:DescribeLogGroups",
+                "logs:DescribeLogStreams"
+            ],
+            "Resource": [
+                "arn:aws:logs:*:*:*"
+            ]
+        }
+    ]
+}
+
+STEP 7 - Update the trust policy of the job execution role
+
+aws emr-containers update-role-trust-policy \
+      --cluster-name EmrOnEKSDemo \
+      --namespace emroneks-demo2 \
+      --role-name EMRContainers-JobExecutionRole \
+      --region us-west-2
+
+STEP 8 - Register the Amazon EKS cluster with Amazon EMR
+
+For multitenant environment, create another virtual cluster with a different namespace on same EKS cluster
+
+aws emr-containers create-virtual-cluster \
+--name emr-on-eks-demo \
+--region us-west-2 \
+--container-provider '{
+    "id": "EmrOnEKSDemo",
+    "type": "EKS",
+    "info": {
+        "eksInfo": {
+            "namespace": "emroneks-demo"
+        }
+    }
+}'
+
+aws emr-containers create-virtual-cluster \
+--name emr-on-eks-demo \
+--region us-west-2 \
+--container-provider '{
+    "id": "EmrOnEKSDemo",
+    "type": "EKS",
+    "info": {
+        "eksInfo": {
+            "namespace": "emroneks-demo2"
+        }
+    }
+}'
+
+Response -
+{
+    "arn": "arn:aws:emr-containers:us-west-2:620614497509:/virtualclusters/ljvwkokyon5j1x4z649lh65x0",
+    "id": "ljvwkokyon5j1x4z649lh65x0",
+    "name": "emr-on-eks-demo"
+}
+
+STEP 9 - Run command to show pods
+
+kubectl get pods -n emroneks-demo --watch
+
+
+STEP 10 - Run jobs on EMR on EKS
+
+aws emr-containers list-virtual-clusters --region us-west-2
+
+aws emr-containers start-job-run \
+--virtual-cluster-id ljvwkokyon5j1x4z649lh65x0 \
+--name 6-2-demo-job \
+--region us-west-2 \
+--execution-role-arn arn:aws:iam::620614497509:role/EMRContainers-JobExecutionRole \
+--release-label emr-6.2.0-latest \
+--job-driver '{"sparkSubmitJobDriver": {"entryPoint": "file:///usr/lib/spark/examples/src/main/python/pi.py", "sparkSubmitParameters":"--conf spark.executor.memory=1G --conf spark.executor.instances=2 --conf spark.executor.cores=1 --conf spark.driver.cores=1"}}' \
+--configuration-overrides '{"monitoringConfiguration": {"cloudWatchMonitoringConfiguration": {"logGroupName": "emroneks"}}}'
+
+
+aws emr-containers start-job-run \
+--virtual-cluster-id ljvwkokyon5j1x4z649lh65x0 \
+--name 5-32-demo-job \
+--region us-west-2 \
+--execution-role-arn arn:aws:iam::620614497509:role/EMRContainers-JobExecutionRole \
+--release-label emr-5.32.0-latest \
+--job-driver '{"sparkSubmitJobDriver": {"entryPoint": "file:///usr/lib/spark/examples/src/main/python/pi.py", "sparkSubmitParameters":"--conf spark.executor.memory=1G --conf spark.executor.instances=2 --conf spark.executor.cores=1 --conf spark.driver.cores=1"}}' \
+--configuration-overrides '{"monitoringConfiguration": {"cloudWatchMonitoringConfiguration": {"logGroupName": "emroneks"}}}'
+
+
+aws emr-containers start-job-run \
+--virtual-cluster-id ljvwkokyon5j1x4z649lh65x0 \
+--name 5-33-demo-job \
+--region us-west-2 \
+--execution-role-arn arn:aws:iam::620614497509:role/EMRContainers-JobExecutionRole \
+--release-label emr-5.33.0-latest \
+--job-driver '{"sparkSubmitJobDriver": {"entryPoint": "file:///usr/lib/spark/examples/src/main/python/pi.py", "sparkSubmitParameters":"--conf spark.executor.memory=1G --conf spark.executor.instances=2 --conf spark.executor.cores=1 --conf spark.driver.cores=1"}}' \
+--configuration-overrides '{"monitoringConfiguration": {"cloudWatchMonitoringConfiguration": {"logGroupName": "emroneks"}}}'
+
+So, what if I want to provide many overrides
+
+aws emr-containers start-job-run --cli-input-json file://emroneks-config.json --region us-west-2
+
+Optional - deploy kubernetes dashboard
+
+STEP 1 - Deploy the Kubernetes dashboard
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.0.5/aio/deploy/recommended.yaml
+
+STEP 2 - Create an eks-admin service account and cluster role binding
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eks-admin
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: eks-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: eks-admin
+  namespace: kube-system
+
+
+kubectl apply -f eks-admin-service-account.yaml
+ serviceaccount/eks-admin created
+ Warning: rbac.authorization.k8s.io/v1beta1 ClusterRoleBinding is deprecated in v1.17+, unavailable in v1.22+; use rbac.authorization.k8s.io/v1 ClusterRoleBinding
+ clusterrolebinding.rbac.authorization.k8s.io/eks-admin created
+
+
+STEP 3 - Connect to the dashboard
+
+kubectl -n kube-system describe secret $(kubectl -n kube-system get secret | grep eks-admin | awk '{print $1}')
+
+aws emr-containers start-job-run \
+--virtual-cluster-id qkgzrvrxa7w2z1m2r1h3idwz0 \
+--name 5-32-demo-job \
+--region us-west-2 \
+--execution-role-arn arn:aws:iam::620614497509:role/EMRContainers-JobExecutionRole \
+--release-label emr-5.32.0-latest \
+--job-driver '{"sparkSubmitJobDriver": {"entryPoint": "file:///usr/lib/spark/examples/src/main/python/pi.py", "sparkSubmitParameters":"--conf spark.executor.memory=1G --conf spark.executor.instances=2 --conf spark.executor.cores=1 --conf spark.driver.cores=1"}}' \
+--configuration-overrides '{"monitoringConfiguration": {"cloudWatchMonitoringConfiguration": {"logGroupName": "emroneks"}}}'
