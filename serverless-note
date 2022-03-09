@@ -140,7 +140,7 @@ aws --region us-east-1 emr-serverless start-job-run \
 
 aws --region us-east-1 emr-serverless get-job-run \
       --application-id 00ev3lkrb4qjhh09 \
-      --job-run-id 00ev3lnl8lmmce01
+      --job-run-id 00ev7p5510q3gu01
 
 aws --region us-east-1 emr-serverless get-job-run \
       --application-id 00ev3ll51bks7b09 \
@@ -184,6 +184,9 @@ aws --region us-east-1 emr-serverless get-application \
 aws --region us-east-1 emr-serverless start-application \
     --application-id 00ev3lsukurd9i09
 
+    aws --region us-east-1 emr-serverless start-application \
+        --application-id  00ev3pqqo2pfuo09
+
 aws --region us-east-1 emr-serverless start-job-run \
     --application-id 00ev3lsukurd9i09 \
     --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
@@ -205,6 +208,11 @@ aws --region us-east-1 emr-serverless start-job-run \
 aws --region us-east-1 emr-serverless get-job-run \
       --application-id 00ev3lsukurd9i09 \
       --job-run-id 00ev3m0du6n5m401
+
+
+      aws --region us-east-1 emr-serverless get-job-run \
+            --application-id 00ev3lsukurd9i09 \
+            --job-run-id  00ev3ps3rc4sfm01
 
 aws s3 cp s3://vasveena-test-demo/serverless/logs/applications/00eulq2g1r802j09/jobs/00eulq3tq7njom01/SPARK_DRIVER/stdout.gz .
 
