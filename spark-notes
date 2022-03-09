@@ -1,0 +1,231 @@
+Spark Step on EMR
+//////////////////
+
+aws s3 rm s3://vasveena-test-demo/spar_output --recursive
+
+from pyspark import SparkContext, SparkConf
+conf = SparkConf().setAppName("WordCount")
+sc = SparkContext(conf=conf)
+file = sc.textFile("s3://commoncrawl/crawl-data/CC-MAIN-2017-22/segments/1495463607325.40/wet/")
+counts = file.flatMap(lambda line: line.split(" ")).map(lambda word: (word, 1)).reduceByKey(lambda a, b: a + b)
+counts.saveAsTextFile("s3://vasveena-test-demo/spar_output/")
+
+aws emr add-steps --cluster-id j-3VZNUJFMRSZD3 --steps Name="Spark Pi Job",Jar=command-runner.jar,Args=[spark-submit,--master,yarn,--conf,spark.executorEnv.YARN_CONTAINER_RUNTIME_TYPE=docker,--conf,spark.executorEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-docker-examples:pyspark-example2,--conf,spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_TYPE=docker,--conf,spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-docker-examples:pyspark-example2,--num-executors,2,--class,org.apache.spark.examples.SparkPi,/usr/lib/spark/examples/jars/spark-examples.jar,10,-v]
+
+spark-submit --master yarn --conf spark.executorEnv.YARN_CONTAINER_RUNTIME_TYPE=docker --conf spark.executorEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=$DOCKER_IMAGE_NAME --conf spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_TYPE=docker --conf spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=$DOCKER_IMAGE_NAME --num-executors 2 --files /etc/spark/conf/log4j.properties,/etc/hadoop/conf/log4j.properties,/etc/hadoop/conf/container-log4j.properties --class org.apache.spark.examples.SparkPi /usr/lib/spark/examples/jars/spark-examples.jar 10 -v
+
+Spark UI
+/////////////////////
+
+spark-shell
+
+import org.apache.spark.sql.SparkSession
+
+val spark = SparkSession
+  .builder()
+  .appName("Dataframes")
+  .config("spark.some.config.option", "some-value")
+  .getOrCreate()
+
+val lineitemDF = spark.read.parquet("s3://vasveena-test-vanguard/bigtpcparq/lineitem/")
+val ordersDF = spark.sql("select * from testdb.vanguardparqorders")
+
+val liCastDF = lineitemDF.withColumn("l_orderkey", expr("CAST(l_orderkey AS BIGINT)"))
+
+val returnedDF = liCastDF.where($"l_returnflag" === "R")
+val orderedDF = ordersDF.where($"o_orderstatus" === "P")
+
+val joinDF = returnedDF.join(orderedDF, returnedDF("l_orderkey") === orderedDF("o_orderkey"))
+
+val aggDF = joinDF.withColumn("final_price", (($"l_quantity" * $"o_totalprice") + $"l_tax") - $"l_discount")
+
+val rangeDF = aggDF.withColumn("price_range", when(col("final_price") >= 100.00,"High").otherwise("Low"))
+
+val resultDF = rangeDF.drop("o_orderkey").cache()
+
+resultDF.printSchema
+
+resultDF.write.mode("overwrite").parquet("s3://vasveena-test-demo/spark-demos/resultdf/")
+
+resultDF.show(10,truncate=false)
+
+resultDF.write.mode("overwrite").csv("s3://vasveena-test-demo/spark-demos/resultdfcsv/")
+
+aws s3 ls s3://vasveena-test-demo/spark-demos/resultdf/
+aws s3 ls s3://vasveena-test-demo/spark-demos/resultcsv/
+
+Spark Streaming Job:
+/////////////////////
+
+ssh -i ~/hadp.pem ec2-user@ec2-34-229-254-142.compute-1.amazonaws.com
+
+Delete Kafka Topic if existing
+
+/home/ec2-user/kafka_2.12-2.2.1/bin/kafka-topics.sh --zookeeper "z-3.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:2181,z-2.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:2181,z-1.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:2181" --delete --topic trip_update_topic
+
+/home/ec2-user/kafka_2.12-2.2.1/bin/kafka-topics.sh --zookeeper "z-3.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:2181,z-2.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:2181,z-1.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:2181" --delete --topic trip_status_topic
+
+Create Kafka topic
+
+/home/ec2-user/kafka_2.12-2.2.1/bin/kafka-topics.sh --create --zookeeper "z-3.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:2181,z-2.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:2181,z-1.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:2181" --replication-factor 3 --partitions 1 --topic trip_update_topic
+
+/home/ec2-user/kafka_2.12-2.2.1/bin/kafka-topics.sh --create --zookeeper "z-3.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:2181,z-2.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:2181,z-1.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:2181" --replication-factor 3 --partitions 1 --topic trip_status_topic
+
+aws kafka get-bootstrap-brokers --cluster-arn arn:aws:kafka:us-east-1:620614497509:cluster/test/2dbb304e-79fe-4beb-a02d-35e0fea4524b-2 | grep BootstrapBrokerString\":
+
+export MTA_API_KEY=UskS0iAsK06DtSffbgqNi8hlDvApPR833wydQAHG
+
+/home/ec2-user/kafka_2.12-2.2.1/bin/kafka-console-consumer.sh --bootstrap-server "b-3.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:9092,b-1.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:9092,b-2.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:9092" --topic trip_update_topic --from-beginning
+
+/home/ec2-user/kafka_2.12-2.2.1/bin/kafka-console-consumer.sh --bootstrap-server "b-3.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:9092,b-1.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:9092,b-2.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:9092" --topic trip_status_topic --from-beginning
+
+python3 train_arrival_producer.py
+
+hdfs dfs -rm -R /user/hadoop/checkpoint
+aws s3 rm s3://vasveena-test-demo/psa_offsite/streaming_output --recursive
+
+# Run spark streaming kafka consumer program in spark-shell
+
+import sys.process._
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.streaming._
+import org.apache.spark.sql.types._
+import org.apache.kafka.clients.producer.{ProducerConfig, KafkaProducer, ProducerRecord}
+import java.util.HashMap
+
+val trip_update_topic = "trip_update_topic"
+val trip_status_topic = "trip_status_topic"
+val broker = "b-1.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:9092,b-3.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:9092,b-2.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:9092"
+
+object MTASubwayTripUpdates extends Serializable {
+
+    val props = new HashMap[String, Object]()
+    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, broker)
+    props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
+      "org.apache.kafka.common.serialization.StringSerializer")
+    props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
+      "org.apache.kafka.common.serialization.StringSerializer")
+
+    @transient var producer : KafkaProducer[String, String] = null
+    var msgId : Long = 1
+    @transient var joined_query : StreamingQuery = null
+    @transient var joined_query_s3 : StreamingQuery = null
+
+    val spark = SparkSession.builder.appName("MSK streaming Example").getOrCreate()
+
+    import spark.implicits._
+
+    def start() = {
+        //Start producer for kafka
+        producer = new KafkaProducer[String, String](props)
+
+        //Create a datastream from trip update topic
+        val trip_update_df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", broker).option("subscribe", trip_update_topic).option("startingOffsets", "latest").option("failOnDataLoss","false").load()
+
+        //Create a datastream from trip status topic
+        val vehicle_df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", broker).option("subscribe", trip_status_topic).option("startingOffsets", "latest").option("failOnDataLoss","false").load()
+
+        // define schema of data
+
+        val trip_update_schema = new StructType().add("trip", new StructType().add("tripId","string").add("startTime","string").add("startDate","string").add("routeId","string")).add("stopTimeUpdate",ArrayType(new StructType().add("arrival",new StructType().add("time","string")).add("stopId","string").add("departure",new StructType().add("time","string"))))
+
+        val vehicle_schema = new StructType().add("trip", new StructType().add("tripId","string").add("startTime","string").add("startDate","string").add("routeId","string")).add("currentStopSequence","integer").add("currentStatus", "string").add("timestamp", "string").add("stopId","string")
+
+        // covert datastream into a datasets and apply schema
+        val trip_update_ds = trip_update_df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)").as[(String, String)]
+        val trip_update_ds_schema = trip_update_ds.select(from_json($"value", trip_update_schema).as("data")).select("data.*")
+        trip_update_ds_schema.printSchema()
+
+        val vehicle_ds = vehicle_df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)").as[(String, String)]
+        val vehicle_ds_schema = vehicle_ds.select(from_json($"value", vehicle_schema).as("data")).select("data.*")
+        vehicle_ds_schema.printSchema()
+
+        val vehicle_ds_unnest = vehicle_ds_schema.select("trip.*","currentStopSequence","currentStatus","timestamp","stopId")
+
+        val trip_update_ds_unnest = trip_update_ds_schema.select($"trip.*", $"stopTimeUpdate.arrival.time".as("arrivalTime"), $"stopTimeUpdate.departure.time".as("depatureTime"), $"stopTimeUpdate.stopId")
+
+        val trip_update_ds_unnest2 = trip_update_ds_unnest.withColumn("numOfFutureStops", size($"arrivalTime")).withColumnRenamed("stopId","futureStopIds")
+
+        val joined_ds = trip_update_ds_unnest2.join(vehicle_ds_unnest, Seq("tripId","routeId","startTime","startDate")).withColumn("startTime",(col("startTime").cast("timestamp"))).withColumn("currentTs",from_unixtime($"timestamp".divide(1000))).drop("startDate").drop("timestamp")
+
+        joined_ds.printSchema()
+
+        //console
+        val joined_query = joined_ds.writeStream.outputMode("complete").format("console").option("truncate", "true").outputMode(OutputMode.Append()).trigger(Trigger.ProcessingTime("10 seconds")).start()
+
+        // write output to S3
+        val joined_query_s3 = joined_ds.writeStream.outputMode("append").format("parquet").queryName("MTA").option("checkpointLocation", "/user/hadoop/checkpoint").trigger(Trigger.ProcessingTime("10 seconds")).option("path", "s3://vasveena-test-demo/psa_offsite/streaming_output/").start().awaitTermination()
+    }
+
+    // Send message to kafka
+    def send(msg: String) = {
+        val message = new ProducerRecord[String, String](trip_update_topic, null, s"$msg")
+        msgId = msgId + 1
+        producer.send(message)
+    }
+  }
+
+MTASubwayTripUpdates.start
+
+aws s3 ls s3://vasveena-test-demo/psa_offsite/streaming_output/
+
+EMR Studio Execution
+//////////////////////
+
+aws s3 ls s3://amazon-reviews-pds/parquet/product_category
+
+aws emr --region us-east-1 \
+start-notebook-execution \
+--editor-id e-ADJE4IMLY5B7JA5WSVQKVV3ML \
+--notebook-params '{"CATEGORIES":["Furniture","PC"], "FROM_DATE":"2015-08-27", "TO_DATE":"2015-08-31", "OUTPUT_LOCATION": "s3://vasveena-test-demo/mwaa/query_output/"}' \
+--relative-path find_best_sellers.ipynb \
+--notebook-execution-name demo-execution \
+--execution-engine '{"Id" : "j-3VZNUJFMRSZD3"}' \
+--service-role EMR_Notebooks_DefaultRole
+
+aws emr --region us-east-1 describe-notebook-execution --notebook-execution-id ex-J02MM6R6V41FU329HBM837W7KJRY7
+
+aws emr --region us-east-1 \
+describe-notebook-execution --notebook-execution-id ex-J02MSOS7QHM6JQNJTOVK5PG3BCTY2
+
+MWAA:
+
+{
+  "airflow_email": "vasveena@amazon.com",
+  "email_on_failure": "true",
+  "email_on_retry": "false"
+}
+
+AWS Step Functions:
+
+{
+  "CreateCluster": true,
+  "TerminateCluster": true
+}
+
+Join Optimization
+//////////////////////
+
+Broadcast Nested Loop Join to Broadcast join
+
+val df1 = spark.sql("select * from testdb.lineitem_shipmodesuppkey_part where l_shipdate='1993-12-03' and l_shipmode='SHIP'")
+val df2 = spark.sql("select * from testdb.lineitem_shipmodesuppkey_part where l_shipdate='1993-12-04' and l_shipmode='SHIP'")
+val nestedLoopDF = df1.join(df2, df1("l_partkey") === df2("l_partkey") || df1("l_linenumber") === df2("l_linenumber"))
+nestedLoopDF.show(5,truncate=false)
+
+val result1 = df1.join(df2, df1("l_partkey") === df2("l_partkey"))
+val result2 = df1.join(df2, df1("l_linenumber") === df2("l_linenumber"))
+val broadcastDF = result1.union(result2)
+broadcastDF.show(5,truncate=false)
+
+Cross join to Broadcast Nested Loop join
+
+spark.conf.set("spark.sql.autoBroadcastJoinThreshold","-1")
+spark.conf.get("spark.sql.autoBroadcastJoinThreshold")
+
+val crossJoinDF = df1.join(df2, df1("l_partkey") >= df2("l_partkey"))
+crossJoinDF.show(5,truncate=false)
+
+val nestedJoinDF = df1.join(broadcast(df2), df1("l_partkey") >= df2("l_partkey"))
+nestedJoinDF.show(5,truncate=false)
