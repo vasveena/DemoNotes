@@ -3,12 +3,35 @@ Spark Step on EMR
 
 aws s3 rm s3://vasveena-test-demo/spar_output --recursive
 
+RDD:
+
 from pyspark import SparkContext, SparkConf
 conf = SparkConf().setAppName("WordCount")
 sc = SparkContext(conf=conf)
 file = sc.textFile("s3://commoncrawl/crawl-data/CC-MAIN-2017-22/segments/1495463607325.40/wet/")
 counts = file.flatMap(lambda line: line.split(" ")).map(lambda word: (word, 1)).reduceByKey(lambda a, b: a + b)
 counts.saveAsTextFile("s3://vasveena-test-demo/spar_output/")
+
+DF:
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import when,col,concat,lit
+
+spark = SparkSession \
+    .builder \
+    .appName("Sample Spark App") \
+    .getOrCreate()
+
+supplier = spark.read.parquet("s3://vasveena-test-vanguard/bigtpcparq/supplier/")
+
+supplier2 = supplier.withColumn("test1", when(col("s_acctbal") > 10, "less than 10").otherwise("more than 10")) \
+                    .withColumn("test2", when(col("s_acctbal") > 6000, "more than 6000").otherwise("more than 6000")) \
+                    .withColumn("test3", concat(lit("tester"), col("s_name"))) \
+                    .withColumn("s_comment", concat(lit(" add to existing comment"), col("s_comment"))) \
+                    .withColumn("test4", col("s_nationkey") + 100) \
+                    .withColumn("s_nationkey", col("s_nationkey") + 1000).cache() \
+
+supplier2.show(5)
 
 aws emr add-steps --cluster-id j-3VZNUJFMRSZD3 --steps Name="Spark Pi Job",Jar=command-runner.jar,Args=[spark-submit,--master,yarn,--conf,spark.executorEnv.YARN_CONTAINER_RUNTIME_TYPE=docker,--conf,spark.executorEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-docker-examples:pyspark-example2,--conf,spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_TYPE=docker,--conf,spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-docker-examples:pyspark-example2,--num-executors,2,--class,org.apache.spark.examples.SparkPi,/usr/lib/spark/examples/jars/spark-examples.jar,10,-v]
 
