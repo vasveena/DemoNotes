@@ -1,0 +1,364 @@
+Console
+-------
+
+Spark job:
+
+s3://vasveena-test-demo/samplejobs/tester.py
+["s3://vasveena-test-demo/serverless/output"]
+s3://vasveena-test-demo/serverless/logs
+
+{
+    "spark.driver.cores": "1",
+    "spark.driver.memory": "3g",
+    "spark.executor.cores": "4",
+    "spark.executor.memory": "3g",
+    "spark.executor.instances": "10"
+}
+
+Hive job:
+
+s3://vasveena-test-demo/serverless/hive/ql/hive-query.ql
+--hiveconf hive.root.logger=DEBUG,DRFA
+
+{
+    "hive.exec.scratchdir": "s3://vasveena-test-demo/serverless/hive/scratch",
+    "hive.metastore.warehouse.dir": "s3://vasveena-test-demo/serverless/hive/warehouse",
+    "hive.driver.cores": "2",
+    "hive.driver.memory": "4g",
+    "hive.tez.container.size": "4096",
+    "hive.tez.cpu.vcores": "1"
+}
+
+log uri: s3://vasveena-test-demo/serverless/hive/logs/
+
+NOAA Data
+//////////
+
+https://registry.opendata.aws/noaa-gsod/
+
+Spark:
+
+export S3_BUCKET="vasveena-test-demo"
+export JOB_ROLE_ARN=arn:aws:iam::620614497509:role/sampleJobExecutionRole
+
+aws emr-serverless create-application \
+  --region us-east-1 \
+  --type SPARK \
+  --name noaa-serverless-demo \
+  --release-label "emr-6.6.0" \
+    --initial-capacity '{
+      "DRIVER": {
+          "workerCount": 2,
+          "resourceConfiguration": {
+            "cpu": "2vCPU",
+            "memory": "4GB",
+            "disk": "30GB"
+          }
+      },
+      "EXECUTOR": {
+        "workerCount": 10,
+        "resourceConfiguration": {
+            "cpu": "4vCPU",
+            "memory": "8GB",
+            "disk": "30GB"
+        }
+      }
+    }' \
+    --maximum-capacity '{
+        "cpu": "200vCPU",
+        "memory": "200GB",
+        "disk": "1000GB"
+    }'
+
+export APPLICATION_ID=00f4cks3b0mqtt09
+
+aws emr-serverless get-application \
+    --application-id $APPLICATION_ID --region us-east-1
+
+aws emr-serverless start-application \
+    --application-id $APPLICATION_ID --region us-east-1
+
+aws emr-serverless start-job-run \
+        --region us-east-1 \
+        --application-id $APPLICATION_ID \
+        --execution-role-arn $JOB_ROLE_ARN \
+        --job-driver '{
+            "sparkSubmit": {
+                "entryPoint": "s3://'${S3_BUCKET}'/code/pyspark/extreme_weather.py",
+                "sparkSubmitParameters": "--conf spark.driver.cores=1 --conf spark.driver.memory=3g --conf spark.executor.cores=4 --conf spark.executor.memory=3g --conf spark.executor.instances=10"
+            }
+        }' \
+        --configuration-overrides '{
+            "monitoringConfiguration": {
+                "s3MonitoringConfiguration": {
+                    "logUri": "s3://'${S3_BUCKET}'/logs/"
+                }
+            }
+        }'
+
+export JOB_RUN_ID=00f4cksu4b8vag01
+
+aws emr-serverless get-job-run \
+    --application-id $APPLICATION_ID \
+    --job-run-id $JOB_RUN_ID \
+    --region us-east-1
+
+aws s3 ls s3://${S3_BUCKET}/logs/applications/$APPLICATION_ID/jobs/$JOB_RUN_ID/
+
+aws s3 cp s3://${S3_BUCKET}/logs/applications/$APPLICATION_ID/jobs/$JOB_RUN_ID/SPARK_DRIVER/stdout.gz - | gunzip
+
+
+Hive:
+
+
+aws emr-serverless create-application \
+  --type HIVE \
+  --name serverless-demo \
+  --region us-east-1 \
+  --release-label "emr-6.6.0" \
+  --initial-capacity '{
+  "DRIVER": {
+      "workerCount": 5,
+      "resourceConfiguration": {
+          "cpu": "2vCPU",
+          "memory": "4GB",
+          "disk": "30GB"
+      }
+  },
+  "TEZ_TASK": {
+      "workerCount": 10,
+      "resourceConfiguration": {
+          "cpu": "4vCPU",
+          "memory": "8GB",
+          "disk": "30GB"
+      }
+  }
+}' \
+    --maximum-capacity '{
+        "cpu": "400vCPU",
+        "memory": "1024GB",
+        "disk": "1000GB"
+    }'
+
+export APPLICATION_ID=00f4clijr9erdd09
+
+aws emr-serverless get-application \
+    --region us-east-1 \
+    --application-id $APPLICATION_ID
+
+aws emr-serverless start-application \
+      --region us-east-1 \
+      --application-id $APPLICATION_ID
+
+
+aws emr-serverless start-job-run \
+          --region us-east-1 \
+          --application-id $APPLICATION_ID \
+          --execution-role-arn $JOB_ROLE_ARN \
+          --job-driver '{
+              "hive": {
+                  "initQueryFile": "s3://'${S3_BUCKET}'/code/hive/create_table.sql",
+                  "query": "s3://'${S3_BUCKET}'/code/hive/extreme_weather.sql",
+                  "parameters": "--hiveconf hive.exec.scratchdir=s3://'${S3_BUCKET}'/hive/scratch --hiveconf hive.metastore.warehouse.dir=s3://'${S3_BUCKET}'/hive/warehouse"
+              }
+          }' \
+          --configuration-overrides '{
+              "applicationConfiguration": [
+                  {
+                      "classification": "hive-site",
+                      "properties": {
+                          "hive.driver.cores": "2",
+                          "hive.driver.memory": "4g",
+                          "hive.tez.container.size": "8192",
+                          "hive.tez.cpu.vcores": "4"
+                      }
+                  }
+              ],
+              "monitoringConfiguration": {
+                  "s3MonitoringConfiguration": {
+                      "logUri": "s3://'${S3_BUCKET}'/hive-logs/"
+                  }
+              }
+          }'
+
+export JOB_RUN_ID=00f4clk6dtcdhj01
+
+aws emr-serverless get-job-run \
+    --region us-east-1 \
+    --application-id $APPLICATION_ID \
+    --job-run-id $JOB_RUN_ID
+
+aws s3 ls s3://${S3_BUCKET}/hive-logs/applications/$APPLICATION_ID/jobs/$JOB_RUN_ID/
+
+
+Glue catalog with EMR serverless Spark
+////////////////////////////////////////
+
+aws s3 rm s3://vasveena-test-demo/emrserverless/taxi-data-glue --recursive
+
+aws emr-serverless list-applications --region us-east-1
+
+result=$(aws --region us-east-1 emr-serverless create-application \
+    --release-label emr-6.7.0 \
+    --type 'SPARK' \
+    --initial-capacity '{
+      "DRIVER": {
+          "workerCount": 5,
+          "resourceConfiguration": {
+            "cpu": "2vCPU",
+            "memory": "4GB"
+          }
+      },
+      "EXECUTOR": {
+        "workerCount": 50,
+        "resourceConfiguration": {
+            "cpu": "4vCPU",
+            "memory": "8GB"
+        }
+      }
+    }' \
+    --maximum-capacity '{
+     "cpu": "400vCPU",
+     "memory": "1024GB"
+   }' \
+    --name spark-6.7.0-demo-application)
+
+echo $result
+
+appID=$(echo $result | jq -r .applicationId)
+
+
+aws --region us-east-1 emr-serverless start-application \
+            --application-id ${appID}
+
+aws --region us-east-1 emr-serverless get-application \
+              --application-id ${appID}
+
+serverlessArn=$(aws iam get-role --role-name sampleJobExecutionRole | jq -r .'Role | .Arn')
+
+s3bucket='vasveena-test-demo'
+
+result=$(echo "aws --region us-east-1 emr-serverless start-job-run \
+    --application-id ${appID} \
+    --execution-role-arn ${serverlessArn} \
+    --job-driver '{
+        \"sparkSubmit\": {
+          \"entryPoint\": \"s3://aws-data-analytics-workshops/emr-eks-workshop/scripts/spark-etl-glue.py\",
+          \"entryPointArguments\": [
+\"s3://aws-data-analytics-workshops/shared_datasets/tripdata/\",\"s3://$s3bucket/emrserverless/taxi-data-glue/\",\"tripdata\"
+],
+          \"sparkSubmitParameters\": \"--conf spark.executor.cores=1 --conf spark.executor.memory=4g --conf spark.driver.cores=1 --conf spark.driver.memory=4g --conf spark.executor.instances=1\"
+                }
+            }' \
+    --configuration-overrides '{
+      \"applicationConfiguration\": [{
+  \"classification\": \"spark-defaults\",
+  \"properties\": {
+    \"spark.dynamicAllocation.enabled\": \"false\",
+    \"spark.hadoop.hive.metastore.client.factory.class\": \"com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory\"
+  }
+}],
+          \"monitoringConfiguration\": {
+            \"s3MonitoringConfiguration\": {
+              \"logUri\": \"s3://$s3bucket/emrserverless/logs\"
+            }
+          }
+        }'" | bash )
+
+
+jobID=$(echo $result | jq -r .'jobRunId')
+
+
+aws --region us-east-1 emr-serverless get-job-run \
+      --application-id $appID \
+      --job-run-id $jobID
+
+
+aws s3 cp s3://$s3bucket/emrserverless/logs/applications/${appID}/jobs/${jobID}/SPARK_DRIVER/stderr.gz .
+aws s3 cp s3://$s3bucket/emrserverless/logs/applications/${appID}/jobs/${jobID}/SPARK_DRIVER/stdout.gz .
+
+aws s3 cp s3://$s3bucket/emrserverless/logs/applications/00f4cjue6stjoo09/jobs/00f4ck33bf6vjn01/SPARK_DRIVER/stderr.gz .
+aws s3 cp s3://$s3bucket/emrserverless/logs/applications/00f4cjue6stjoo09/jobs/00f4ck33bf6vjn01/SPARK_DRIVER/stdout.gz .
+
+
+aws s3 cp s3://$s3bucket/emrserverless/logs/applications/00f4cjue6stjoo09/jobs/00f4cjv7f7r83501/SPARK_DRIVER/stderr.gz .
+aws s3 cp s3://$s3bucket/emrserverless/logs/applications/00f4cjue6stjoo09/jobs/00f4cjv7f7r83501/SPARK_DRIVER/stdout.gz .
+
+Glue catalog with EMR Serverless Hive 
+////////////////////////
+
+result=$(aws --region us-east-1 emr-serverless create-application \
+    --release-label emr-6.7.0 \
+    --initial-capacity '{
+    "DRIVER": {
+        "workerCount": 5,
+        "resourceConfiguration": {
+            "cpu": "2vCPU",
+            "memory": "4GB"
+        }
+    },
+    "TEZ_TASK": {
+        "workerCount": 50,
+        "resourceConfiguration": {
+            "cpu": "4vCPU",
+            "memory": "8GB"
+        }
+    }
+  }' \
+  --maximum-capacity '{
+    "cpu": "400vCPU",
+    "memory": "1024GB"
+  }' \
+  --type 'HIVE' \
+  --name hive-6.7.0-demo-application)
+
+echo $result
+
+appID=$(echo $result | jq -r .applicationId)
+
+
+aws --region us-east-1 emr-serverless start-application \
+          --application-id ${appID}
+
+
+aws --region us-east-1 emr-serverless get-application \
+          --application-id ${appID}
+
+
+result=$(echo "aws --region us-east-1 emr-serverless start-job-run \
+              --application-id ${appID} \
+              --execution-role-arn ${serverlessArn} \
+              --job-driver '{
+                  \"hive\": {
+                      \"query\": \"s3://$s3bucket/emr-serverless-hive/query/hive-query.ql\",
+                      \"parameters\": \"--hiveconf hive.root.logger=DEBUG,DRFA\"
+                  }
+              }' \
+              --configuration-overrides '{
+                  \"applicationConfiguration\": [{
+                     \"classification\": \"hive-site\",
+                         \"properties\": {
+                         \"hive.exec.scratchdir\": \"s3://$s3bucket/emr-serverless-hive/hive/scratch\",
+                         \"hive.metastore.warehouse.dir\": \"s3://$s3bucket/emr-serverless-hive/hive/warehouse\",
+                         \"hive.driver.cores\": \"2\",
+                         \"hive.driver.memory\": \"4g\",
+                         \"hive.tez.container.size\": \"4096\",
+                         \"hive.tez.cpu.vcores\": \"1\"
+                      }
+                      }
+                      ],
+                  \"monitoringConfiguration\": {
+                    \"s3MonitoringConfiguration\": {
+                      \"logUri\": \"s3://$s3bucket/emrserverless-hive/logs\"
+                    }
+                  }
+                }'" | bash )
+
+
+jobID=$(echo $result | jq -r .'jobRunId')
+
+aws --region us-east-1 emr-serverless get-job-run \
+      --application-id $appID \
+      --job-run-id $jobID
+
+aws s3 ls s3://$s3bucket/emrserverless-hive/logs/
