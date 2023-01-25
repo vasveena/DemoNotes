@@ -116,14 +116,14 @@ sudo docker push 620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-serverless-ci-
 aws --region us-east-1  emr-serverless create-application \
     --release-label emr-6.9.0 \
     --type "SPARK" \
-    --name custom-jre-with-ci \
+    --name emrserverless-custom-images-demo \
     --image-configuration '{ "imageUri": "620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-serverless-ci-examples:emr-serverless-ci-java11" }'
 
 
 aws emr-serverless start-job-run \
         --name custom-image-java11-job \
         --region us-east-1 \
-        --application-id 00f7c093bl64pl09 \
+        --application-id 00f7c0srljjgl409 \
         --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
         --job-driver '{
             "sparkSubmit": {
@@ -157,7 +157,7 @@ RUN pip3 install xgboost
 RUN sed -i 's|import Parallel, delayed|import Parallel, delayed, logger|g' /usr/local/lib/python3.7/site-packages/skdist/distribute/search.py
 
 # EMRS will run the image as hadoop
-USER hadoop:hadoop    
+USER hadoop:hadoop
 
 Delta OSS
 ///////////
@@ -168,8 +168,8 @@ aws --region us-east-1 emr-serverless start-job-run \
     --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
     --job-driver '{
         "sparkSubmit": {
-          "entryPoint": "s3://vasveena-test-demo/jobs/delta-job-v1.py",
-          "sparkSubmitParameters": "--conf spark.jars=/usr/share/aws/delta/lib/delta-core.jar,/usr/share/aws/delta/lib/delta-storage.jar,/usr/share/aws/delta/lib/delta-storage-s3-dynamodb.jar"
+          "entryPoint": "s3://vasveena-test-demo/jobs/delta-job.py",
+          "sparkSubmitParameters": "--conf spark.jars=/usr/share/aws/delta/lib/delta-core.jar,/usr/share/aws/delta/lib/delta-storage.jar,/usr/share/aws/delta/lib/delta-storage-s3-dynamodb.jar --conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog"
                 }
             }' \
     --configuration-overrides '{
@@ -198,11 +198,8 @@ data =  spark.createDataFrame([("100", "2015-01-01", "2015-01-01T13:51:39.340396
 ("103",  "2015-01-01",  "2015-01-01T13:51:40.519832Z")],
 ["id", "creation_date",  "last_update_time"])
 
-## Create database
-spark.sql("""CREATE  DATABASE if not exists delta location 's3://vasveena-test-demo/delta-lake/'""");
-
 ## Write a DataFrame as a Delta Lake dataset to the S3  location
-spark.sql("""CREATE  TABLE IF NOT EXISTS delta.delta_table (id string, creation_date string,
+spark.sql("""CREATE  TABLE IF NOT EXISTS delta_table (id string, creation_date string,
 last_update_time string)
 USING delta location
 's3://vasveena-test-demo/delta-lake/db/delta_table'""");
@@ -227,6 +224,8 @@ for EMR on EC2 -
 	}
 }]
 
+pyspark --conf "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension" \
+   --conf "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog"
 
 Cloudwatch Metrics & MWAA -> console
 /////////////////////////////////////
