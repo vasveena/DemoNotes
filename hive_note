@@ -14,11 +14,15 @@ Demo 1.0 - Create EMR cluster with Hive and JSON configurations (AWS Glue Data C
 	"configurations": []
 }]
 
+hive --service llapstatus
+
 Demo 1.1 - Run queries on top of S3
 
 You can use beeline or CLI
 
-!connect jdbc:hive2://ip-172-31-78-42.ec2.internal:10000/default
+hdfs dfs -chmod -R 777 /user
+
+!connect jdbc:hive2://localhost:10000/default
 
 drop table if exists testdb.wikistats_orc;
 
@@ -31,10 +35,11 @@ LOCATION 's3://vasveena-test-presto/orc/';
 select sum(hits) as sumOfHits, page_title
 from testdb.wikistats_orc
 group by page_title
-order by sumOfHits;
+order by sumOfHits
+limit 5;
 
 select count(*) from testdb.lineitem
-where l_shipdate='1992-01-04' and l_suppkey=1002386;
+where l_shipdate='1994-02-17' and l_suppkey=2206129;
 
 select count(*) from testdb.lineitempart
 where l_shipdate = '1994-02-17' and l_suppkey=2206129
@@ -61,6 +66,8 @@ INSERT OVERWRITE TABLE testdb.lineitembucketedinsert partition (l_shipdate) sele
 
 Demo 1.2 - Run query on DynamoDB table
 
+drop table change_control_table;
+
 CREATE EXTERNAL TABLE change_control_table (
     database_name string,
     partition_path string,
@@ -80,12 +87,13 @@ select * from change_control_table;
 
 Demo 1.5 - Run query using EMR Steps
 
-aws emr add-steps --cluster-id j-30ZUAR599JRIV --steps Type=Hive,Name="Hive Job",ActionOnFailure=CONTINUE,Args=[-f,s3://elasticmapreduce/samples/hive-ads/libs/response-time-stats.q,-d,INPUT=s3://elasticmapreduce/samples/hive-ads/tables,-d,OUTPUT=s3://mybucket/hive-ads/output/,-d,SAMPLE=s3://elasticmapreduce/samples/hive-ads/]
+hive-script --run-hive-script --args -f s3://eu-west-1.elasticmapreduce.samples/cloudfront/code/Hive_CloudFront.q -d INPUT=s3://eu-west-1.elasticmapreduce.samples -d OUTPUT=s3://vasveena-test-demo/MyHiveQueryResults/
+
+aws emr add-steps --cluster-id 	j-37E7HIL4QK503 --steps Type=Hive,Name="Hive Job",ActionOnFailure=CONTINUE,Args=[-f,s3://elasticmapreduce/samples/hive-ads/libs/response-time-stats.q,-d,INPUT=s3://elasticmapreduce/samples/hive-ads/tables,-d,OUTPUT=s3://mybucket/hive-ads/output/,-d,SAMPLE=s3://elasticmapreduce/samples/hive-ads/]
 
 Demo 1.6 - Run query using Hue notebooks and JDBC
 
-ssh -o ServerAliveInterval=10 -i ~/hadp.pem -N -L 10000:localhost:10000 hadoop@ec2-18-234-107-4.compute-1.amazonaws.com
-jdbc:hive2://localhost:10000/default
+ssh -o ServerAliveInterval=10 -i ~/hadp.pem -N -L 10000:localhost:10000 hadoop@ec2-44-212-221-97.compute-1.amazonaws.com jdbc:hive2://localhost:10000/default
 
 Demo 1.7 - Run query using EMR Persistent Notebooks (parameterized)
 
@@ -93,9 +101,16 @@ aws s3 ls s3://amazon-reviews-pds/parquet/product_category
 
 Demo 1.8 - Run Hive batch jobs using AWS Step Functions and Amazon MWAA
 
-Demo 1.9 - EMR Serverless
+{
+  "CreateCluster": true,
+  "TerminateCluster": true
+}
 
-Demo 1.10 - Run ACID queries
+Demo 1.9 - Run ACID queries
+
+mysql -h hivemetadb.cluster-cxlolvlnaden.us-east-1.rds.amazonaws.com -u mars -p
+
+aws s3 rm s3://vasveena-test-demo/hive/acid_tbl --recursive
 
 A single statement can write to multiple partitions or multiple tables. If the operation fails, partial writes or inserts are not visible to users. Operations remain performant even if data changes often, such as one percent per hour. Does not overwrite the entire partition to perform update or delete operations.
 
@@ -103,13 +118,14 @@ set hive.support.concurrency=true;
 set hive.exec.dynamic.partition.mode=nonstrict;
 set hive.txn.manager=org.apache.hadoop.hive.ql.lockmgr.DbTxnManager;
 
+drop table if exists acid_tbl;
+
 CREATE TABLE acid_tbl
 (
   key INT,
   value STRING,
   action STRING
 )
---PARTITIONED BY (trans_date DATE)
 CLUSTERED BY (key) INTO 3 BUCKETS
 STORED AS ORC
 LOCATION 's3://vasveena-test-demo/hive/acid_tbl'
@@ -167,7 +183,9 @@ select row__id, key, value, action from acid_tbl;
 
 hive --service llapstatus
 
-http://coretask-public-dns-name:15002	Shows the overview of heap, cache, executor and system metrics
+ec2-44-200-204-141.compute-1.amazonaws.com
+
+http://ec2-44-200-204-141.compute-1.amazonaws.com:15002	Shows the overview of heap, cache, executor and system metrics
 http://coretask-public-dns-name:15002/conf	Shows the current LLAP configuration
 http://coretask-public-dns-name:15002/peers	Shows the details of LLAP nodes in the cluster extracted from the Zookeeper server
 http://coretask-public-dns-name:15002/iomem	Shows details about the cache contents and usage
@@ -175,3 +193,126 @@ http://coretask-public-dns-name:15002/jmx	Shows the LLAP daemon’s JVM metrics
 http://coretask-public-dns-name:15002/stacks	Shows JVM stack traces of all threads
 http://coretask-public-dns-name:15002/conflog	Shows the current log levels
 http://coretask-public-dns-name:15002/status	Shows the status of LLAP
+
+Demo 1.10 - Query Hudi
+
+select * from  hudi_mor_trips_table_ro limit 5;
+select * from  hudi_mor_trips_table_rt limit 5;
+
+
+Hive on EMR Serverless
+----------------------
+
+aws emr-serverless delete-application --application-id 00eu60lvd6it8b09 --region us-east-1
+
+aws --region us-east-1 emr-serverless create-application \
+    --release-label emr-6.9.0 \
+    --initial-capacity '{
+    "DRIVER": {
+        "workerCount": 5,
+        "resourceConfiguration": {
+            "cpu": "2vCPU",
+            "memory": "4GB"
+        }
+    },
+    "TEZ_TASK": {
+        "workerCount": 50,
+        "resourceConfiguration": {
+            "cpu": "4vCPU",
+            "memory": "8GB"
+        }
+    }
+  }' \
+  --type 'HIVE' \
+  --name hive-6.9.0-demo-application
+
+aws --region us-east-1 emr-serverless create-application \
+        --release-label emr-5.34.0-preview \
+        --initial-capacity '{
+        "DRIVER": {
+            "workerCount": 5,
+            "resourceConfiguration": {
+                "cpu": "2vCPU",
+                "memory": "4GB"
+            }
+        },
+        "TEZ_TASK": {
+            "workerCount": 50,
+            "resourceConfiguration": {
+                "cpu": "4vCPU",
+                "memory": "8GB"
+            }
+        }
+      }' \
+        --type 'HIVE' \
+        --name hive-5.34.0-demo-application
+
+
+aws --region us-east-1 emr-serverless start-job-run \
+      --application-id 00f82n8psr68pp09 \
+      --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
+      --job-driver '{
+            "hive": {
+            "query": "s3://vasveena-test-demo/serverless/hive/ql/hive-query.ql",
+            "parameters": "--hiveconf hive.root.logger=DEBUG,DRFA"
+           }
+          }' \
+      --configuration-overrides '{
+            "applicationConfiguration": [{
+            "classification": "hive-site",
+            "properties": {
+                "hive.exec.scratchdir": "s3://vasveena-test-demo/serverless/hive/scratch",
+                "hive.metastore.warehouse.dir": "s3://vasveena-test-demo/serverless/hive/warehouse",
+                "hive.driver.cores": "2",
+                "hive.driver.memory": "4g",
+                "hive.tez.container.size": "4096",
+                "hive.tez.cpu.vcores": "1"
+              }
+            }],
+            "monitoringConfiguration": {
+                "s3MonitoringConfiguration": {
+                "logUri": "s3://vasveena-test-demo/serverless/hive/logs/"
+               }
+              }
+            }'
+
+aws --region us-east-1 emr-serverless start-job-run \
+    --application-id 00f81qask55hjt09 \
+    --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
+    --job-driver '{
+        "hive": {
+          "query": "s3://vasveena-test-demo/serverless/hive/ql/hive-query.ql",
+          "parameters": "--hiveconf hive.root.logger=DEBUG,DRFA"
+        }
+      }' \
+    --configuration-overrides '{
+        "applicationConfiguration": [{
+          "classification": "hive-site",
+          "properties": {
+            "hive.exec.scratchdir": "s3://vasveena-test-demo/serverless/hive/scratch",
+            "hive.metastore.warehouse.dir": "s3://vasveena-test-demo/serverless/hive/warehouse",
+            "hive.driver.cores": "2",
+            "hive.driver.memory": "4g",
+            "hive.tez.container.size": "4096",
+            "hive.tez.cpu.vcores": "1"
+            }
+          }],
+          "monitoringConfiguration": {
+            "s3MonitoringConfiguration": {
+              "logUri": "s3://vasveena-test-demo/serverless/hive/logs/"
+             }
+            }
+          }'
+
+aws --region us-east-1 emr-serverless get-job-run \
+      --application-id 00f81qa6gd1bb609 \
+      --job-run-id 00f81qaipfnivf09
+
+aws --region us-east-1 emr-serverless get-job-run \
+      --application-id 00f81qask55hjt09 \
+      --job-run-id 00f81qb3ktcth309
+
+aws s3 cp s3://vasveena-test-demo/serverless/hive/logs/applications/00f81qa6gd1bb609/jobs/00f81qaipfnivf09/HIVE_DRIVER/stdout.gz .
+
+
+aws s3 cp s3://vasveena-test-demo/serverless/hive/logs/applications/00eulpmu79n7d109/jobs/00eulpvlj223sa01/HIVE_DRIVER/stdout.gz .

@@ -1,8 +1,11 @@
 1) Create HBase table
-sudo -su hbase chmod -R 777 /var/log/hbase/hbase.log
+sudo chmod -R 777 /var/log/hbase/hbase.log
 sudo -su hbase chmod -R 777 /var/log/hbase/SecurityAuth.audit
 
 hbase shell
+>> disable 'customer'
+>> drop 'customer'
+>> delete_snapshot 'customer_snapshot1'
 >> create 'customer', 'address', 'cc', 'contact'
 
 2) Restore snapshot from an existing table
@@ -104,6 +107,7 @@ GROUP BY name;
 7) Run queries using Phoenix
 
 /usr/lib/phoenix/bin/sqlline-thin.py http://localhost:8765
+/usr/lib/phoenix/bin/sqlline.py
 
 CREATE TABLE "customer" (
 pk VARCHAR PRIMARY KEY,
@@ -177,6 +181,7 @@ Demo 2 - HBase on S3
 
 1) Create HBase table
 sudo -su hbase chmod -R 777 /var/log/hbase/hbase.log
+sudo chmod -R 777 /var/log/hbase
 sudo -su hbase chmod -R 777 /var/log/hbase/SecurityAuth.audit
 
 hbase shell
@@ -187,7 +192,7 @@ hbase shell
 
 2) Restore snapshot from an existing table
 
-sudo su hbase -s /bin/sh -c 'hbase snapshot export -D hbase.rootdir=s3://us-east-1.elasticmapreduce.samples/hbase-demo-customer-data/snapshot -snapshot customer_snapshot1 -copy-to s3://vasveena-test-base-east/ -mappers 20 -chuser hbase -chmod 700'
+sudo su hbase -s /bin/sh -c 'hbase snapshot export -D hbase.rootdir=s3://us-east-1.elasticmapreduce.samples/hbase-demo-customer-data/snapshot -snapshot customer_snapshot1 -copy-to s3://vasveena-test-base-east2/ -mappers 20 -chuser hbase -chmod 700'
 
 3) Restore HBase snapshot
 
@@ -202,6 +207,10 @@ Get all the data on a specific customer
 get 'customer', 'armstrong_zula_8570365786'
 
 5) Query this table in Hue, Hive, Phoenix similar to HDFS
+
+refresh_meta
+refresh_hfiles
+
 hdfs dfs -chmod 777 /user
 Abbott* +100 [cc:type,address:state]
 

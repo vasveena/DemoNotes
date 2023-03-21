@@ -1,0 +1,408 @@
+EMR on EKS
+-------------
+
+Get EKS nodes
+//////////////
+
+kubectl get nodes -o wide
+
+eksctl get cluster --region us-east-1
+
+Get EMR virtual clusters
+////////////////////////////
+
+aws emr-containers list-virtual-clusters --region us-east-1
+
+sudo yum install -y jq
+
+ec2_vc=$(aws emr-containers list-virtual-clusters --region us-east-1 | jq -r .'virtualClusters[] | select(.name == "ec2-vc") | .id')
+
+fargate_vc=$(aws emr-containers list-virtual-clusters --region us-east-1 | jq -r .'virtualClusters[] | select(.name == "fargate-vc") | .id')
+
+emrOnEksExecRoleArn=$(aws iam list-roles | jq -r .'Roles[] | select(.RoleName | endswith("-EMRExectionRole")) | .Arn')
+
+accountID=$(aws sts get-caller-identity --query Account --output text)
+
+Start a job in EMR on EKS
+/////////////////////////
+
+aws emr-containers start-job-run --virtual-cluster-id ${ec2_vc} \
+--name spark-pi-6.9 \
+--execution-role-arn ${emrOnEksExecRoleArn} \
+--release-label emr-6.9.0-latest \
+--job-driver '{
+    "sparkSubmitJobDriver": {
+        "entryPoint": "s3://aws-data-analytics-workshops/emr-eks-workshop/scripts/pi.py",
+        "sparkSubmitParameters": "--conf spark.executor.instances=2 --conf spark.executor.memory=2G --conf spark.executor.cores=2 --conf spark.driver.cores=1"
+        }
+    }' \
+--configuration-overrides '{"monitoringConfiguration": {"cloudWatchMonitoringConfiguration": {"logGroupName": "emroneks"}}}' \
+--region us-east-1
+
+kubectl get pods -n ec2-ns --watch
+
+Start a job in EMR on EKS using config JSON file
+/////////////////////////////////////////////////
+
+aws emr-containers start-job-run --cli-input-json file://emroneks-config.json --region us-east-1
+
+emroneks-config.json:
+
+{
+	"name": "spark-glue-integration-and-s3-log",
+	"virtualClusterId": "x4kz3xssx73cbh9b28mk1wr11",
+	"executionRoleArn": "arn:aws:iam::882842168738:role/emr-on-eks-PrepStack-19OWDDVKFCGUS-EMRExectionRole",
+	"releaseLabel": "emr-6.5.0-latest",
+	"jobDriver": {
+		"sparkSubmitJobDriver": {
+			"entryPoint": "s3://aws-data-analytics-workshops/emr-eks-workshop/scripts/spark-etl-glue.py",
+			"entryPointArguments": [
+				"s3://aws-data-analytics-workshops/shared_datasets/tripdata/", "s3://mrworkshop-882842168738-dayone/taxi-data-glue/", "tripdata"
+			],
+			"sparkSubmitParameters": "--conf spark.driver.cores=1 --conf spark.executor.memory=2G --conf spark.driver.memory=2G --conf spark.executor.cores=2"
+		}
+	},
+	"configurationOverrides": {
+		"applicationConfiguration": [{
+				"classification": "spark-defaults",
+				"properties": {
+					"spark.dynamicAllocation.enabled": "false",
+					"spark.hadoop.hive.metastore.client.factory.class": "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory"
+				}
+			},
+			{
+				"classification": "spark-log4j",
+				"properties": {
+					"log4j.rootCategory": "DEBUG, console"
+				}
+			}
+		],
+		"monitoringConfiguration": {
+			"cloudWatchMonitoringConfiguration": {
+				"logGroupName": "emroneks"
+			},
+			"s3MonitoringConfiguration": {
+				"logUri": "s3://mrworkshop-882842168738-dayone/emroneks/logs/"
+			}
+		}
+	}
+}
+
+Checkout the sample job - s3://aws-data-analytics-workshops/emr-eks-workshop/scripts/spark-etl-glue.py
+
+Run Athena query to see table created in Glue catalog - select * from tripdata.ny_taxi_parquet limit 10;
+
+Change EMR Release label:
+////////////////////////////
+
+aws emr-containers start-job-run --virtual-cluster-id ${ec2_vc} \
+--name spark-pi-5.34 \
+--execution-role-arn ${emrOnEksExecRoleArn} \
+--release-label emr-5.34.0-latest \
+--job-driver '{
+    "sparkSubmitJobDriver": {
+        "entryPoint": "s3://aws-data-analytics-workshops/emr-eks-workshop/scripts/pi.py",
+        "sparkSubmitParameters": "--conf spark.executor.instances=2 --conf spark.executor.memory=2G --conf spark.executor.cores=2 --conf spark.driver.cores=1"
+        }
+    }' \
+--configuration-overrides '{"monitoringConfiguration": {"cloudWatchMonitoringConfiguration": {"logGroupName": "emroneks"}}}' \
+--region us-east-1
+
+Change job minor version
+/////////////////////////
+
+aws emr-containers start-job-run --virtual-cluster-id ${ec2_vc} \
+--name spark-pi-6.2 \
+--execution-role-arn ${emrOnEksExecRoleArn} \
+--release-label emr-6.2.0-latest \
+--job-driver '{
+    "sparkSubmitJobDriver": {
+        "entryPoint": "s3://aws-data-analytics-workshops/emr-eks-workshop/scripts/pi.py",
+        "sparkSubmitParameters": "--conf spark.executor.instances=2 --conf spark.executor.memory=2G --conf spark.executor.cores=2 --conf spark.driver.cores=1"
+        }
+    }' \
+--configuration-overrides '{"monitoringConfiguration": {"cloudWatchMonitoringConfiguration": {"logGroupName": "emroneks"}}}' \
+--region us-east-1
+
+Submit serverless Spark jobs using Fargate
+///////////////////////////////////////////
+
+aws emr-containers start-job-run --virtual-cluster-id ${fargate_vc} \
+--name spark-pi-5.34 \
+--execution-role-arn ${emrOnEksExecRoleArn} \
+--release-label emr-5.34.0-latest \
+--job-driver '{
+    "sparkSubmitJobDriver": {
+        "entryPoint": "s3://aws-data-analytics-workshops/emr-eks-workshop/scripts/pi.py",
+        "sparkSubmitParameters": "--conf spark.executor.instances=2 --conf spark.executor.memory=2G --conf spark.executor.cores=2 --conf spark.driver.cores=1"
+        }
+    }' \
+--configuration-overrides '{"monitoringConfiguration": {"cloudWatchMonitoringConfiguration": {"logGroupName": "emroneks"}}}' \
+--region us-east-1
+
+Deploy Kubernetes dashboard
+//////////////////////////////
+
+export DASHBOARD_VERSION="v2.0.0"
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/${DASHBOARD_VERSION}/aio/deploy/recommended.yaml
+kubectl proxy --port=8080 --address=0.0.0.0 --disable-filter=true &
+
+Tools -> Preview -> Preview Running application
+/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/
+
+kubectl -n kube-system describe secret $(kubectl -n kube-system get secret | grep eks-admin | awk '{print $1}')
+
+MWAA
+////
+
+Single-AZ placement
+////////////////////
+
+aws emr-containers start-job-run --virtual-cluster-id ${ec2_vc} \
+--name spark-single-az-us-east-1a \
+--execution-role-arn ${emrOnEksExecRoleArn} \
+--release-label emr-5.34.0-latest \
+--job-driver '{
+    "sparkSubmitJobDriver": {
+        "entryPoint": "s3://aws-data-analytics-workshops/emr-eks-workshop/scripts/pi.py",
+        "sparkSubmitParameters": "--conf spark.kubernetes.node.selector.topology.kubernetes.io/zone='us-east-1a' --conf spark.executor.instances=1 --conf spark.executor.memory=2G --conf spark.executor.cores=2 --conf spark.driver.cores=1"
+        }
+    }' \
+--configuration-overrides '{"monitoringConfiguration": {"cloudWatchMonitoringConfiguration": {"logGroupName": "emroneks"}}}' \
+--region us-east-1
+
+EMR Serverless
+----------------
+
+Creating EMR Serverless application
+//////////////////////////////////////
+
+aws --region us-east-1  emr-serverless create-application \
+    --release-label emr-6.9.0 \
+    --type "SPARK" \
+    --name emrserverless-sparkapp-demo \
+    --initial-capacity '{
+    "DRIVER": {
+        "workerCount": 1,
+        "workerConfiguration": {
+            "cpu": "2vCPU",
+            "memory": "4GB",
+            "disk": "200GB"
+        }
+    },
+    "EXECUTOR": {
+        "workerCount": 10,
+        "workerConfiguration": {
+            "cpu": "2vCPU",
+            "memory": "4GB",
+            "disk": "200GB"
+        }
+    }
+  }' \
+  --maximum-capacity '{
+      "cpu": "200vCPU",
+      "memory": "400GB",
+      "disk": "20000GB"
+    }' \
+     --network-configuration subnetIds=subnet-07299cca50676f4cd,securityGroupIds=sg-0f57c55f659d957b7 \
+     --auto-stop-configuration enabled=false
+
+
+aws --region us-east-1 emr-serverless start-job-run \
+    --name spark-job \
+    --application-id 00f81t6jpt20nt09 \
+    --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
+    --job-driver '{
+        "sparkSubmit": {
+          "entryPoint": "s3://vasveena-test-demo/samplejobs/tester.py",
+          "entryPointArguments": ["s3://vasveena-test-demo/serverless/output"],
+          "sparkSubmitParameters": "--conf spark.executor.cores=1 --conf spark.executor.memory=4g --conf spark.driver.cores=1 --conf spark.driver.memory=4g --conf spark.executor.instances=1"
+                }
+            }' \
+    --configuration-overrides '{
+          "monitoringConfiguration": {
+            "s3MonitoringConfiguration": {
+              "logUri": "s3://vasveena-test-demo/serverless/logs"
+            }
+          }
+        }'
+
+PySpark job -
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import when,col,concat,lit
+
+spark = SparkSession \
+    .builder \
+    .appName("Sample Spark App") \
+    .getOrCreate()
+
+supplier = spark.read.parquet("s3://vasveena-test-vanguard/bigtpcparq/supplier/")
+
+supplier2 = supplier.withColumn("test1", when(col("s_acctbal") > 10, "less than 10").otherwise("more than 10")) \
+                    .withColumn("test2", when(col("s_acctbal") > 6000, "more than 6000").otherwise("more than 6000")) \
+                    .withColumn("test3", concat(lit("tester"), col("s_name"))) \
+                    .withColumn("s_comment", concat(lit(" add to existing comment"), col("s_comment"))) \
+                    .withColumn("test4", col("s_nationkey") + 100) \
+                    .withColumn("s_nationkey", col("s_nationkey") + 1000).cache() \
+
+supplier2.show(5)
+
+aws s3 cp s3://vasveena-test-demo/serverless/hive/logs/applications/00eulpmu79n7d109/jobs/00eulpvlj223sa01/HIVE_DRIVER/stdout.gz .
+
+Graviton2
+//////////
+
+aws emr-serverless create-application \
+ --name emrserverless-graviton-demo \
+ --release-label emr-6.9.0 \
+ --type "SPARK" \
+ --architecture "ARM64" \
+ --region us-east-1
+
+
+ aws --region us-east-1 emr-serverless start-job-run \
+     --name graviton-job \
+     --application-id 00f7toaa9hv4b909 \
+     --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
+     --job-driver '{
+         "sparkSubmit": {
+           "entryPoint": "s3://vasveena-test-demo/samplejobs/tester.py",
+           "entryPointArguments": ["s3://vasveena-test-demo/serverless/output"],
+           "sparkSubmitParameters": "--conf spark.executor.cores=1 --conf spark.executor.memory=4g --conf spark.driver.cores=1 --conf spark.driver.memory=4g --conf spark.executor.instances=1"
+                 }
+             }' \
+     --configuration-overrides '{
+           "monitoringConfiguration": {
+             "s3MonitoringConfiguration": {
+               "logUri": "s3://vasveena-test-demo/serverless/logs"
+             }
+           }
+         }'
+
+
+Custom Images
+///////////////
+
+sudo aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin 620614497509.dkr.ecr.us-east-1.amazonaws.com
+
+sudo docker build -t local/emr-serverless-ci-java11 /home/hadoop/customjre/
+sudo docker tag local/emr-serverless-ci-java11:latest 620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-serverless-ci-examples:emr-serverless-ci-java11
+sudo docker push 620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-serverless-ci-examples:emr-serverless-ci-java11
+
+aws --region us-east-1  emr-serverless create-application \
+    --release-label emr-6.9.0 \
+    --type "SPARK" \
+    --name emrserverless-custom-images-demo \
+    --image-configuration '{ "imageUri": "620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-serverless-ci-examples:emr-serverless-ci-java11" }'
+
+
+aws emr-serverless start-job-run \
+        --name custom-image-java11-job \
+        --region us-east-1 \
+        --application-id 00f81tc2v3u46g09 \
+        --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
+        --job-driver '{
+            "sparkSubmit": {
+                "entryPoint": "s3://vasveena-test-demo/jars/emrserverless-custom-images_2.12-1.0.jar",
+                "entryPointArguments": ["40000000"],
+                "sparkSubmitParameters": "--conf spark.executorEnv.JAVA_HOME=/usr/lib/jvm/java-11-openjdk-11.0.16.0.8-1.amzn2.0.1.x86_64 --conf spark.emr-serverless.driverEnv.JAVA_HOME=/usr/lib/jvm/java-11-openjdk-11.0.16.0.8-1.amzn2.0.1.x86_64 --class emrserverless.customjre.SyntheticAnalysis"
+            }
+        }' \
+        --configuration-overrides '{
+              "monitoringConfiguration": {
+                "s3MonitoringConfiguration": {
+                  "logUri": "s3://vasveena-test-demo/emrserverless/logs"
+                }
+              }
+            }'
+
+Dockerfile -
+
+FROM public.ecr.aws/emr-serverless/spark/emr-6.9.0:latest
+
+USER root
+
+# Install JDK 11
+RUN amazon-linux-extras install java-openjdk11
+
+# python packages
+RUN pip3 install boto3 pandas numpy
+RUN pip3 install -U scikit-learn==0.23.2 scipy
+RUN pip3 install sk-dist
+RUN pip3 install xgboost
+RUN sed -i 's|import Parallel, delayed|import Parallel, delayed, logger|g' /usr/local/lib/python3.7/site-packages/skdist/distribute/search.py
+
+# EMRS will run the image as hadoop
+USER hadoop:hadoop
+
+Delta OSS
+///////////
+
+aws --region us-east-1 emr-serverless start-job-run \
+    --name deltalake-job \
+    --application-id 	00f7toa3c1tv7d09 \
+    --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
+    --job-driver '{
+        "sparkSubmit": {
+          "entryPoint": "s3://vasveena-test-demo/jobs/delta-job.py",
+          "sparkSubmitParameters": "--conf spark.jars=/usr/share/aws/delta/lib/delta-core.jar,/usr/share/aws/delta/lib/delta-storage.jar,/usr/share/aws/delta/lib/delta-storage-s3-dynamodb.jar --conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog"
+                }
+            }' \
+    --configuration-overrides '{
+          "monitoringConfiguration": {
+            "s3MonitoringConfiguration": {
+              "logUri": "s3://vasveena-test-demo/serverless/logs"
+            }
+          }
+        }'
+
+
+PySpark job:
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import when,col,concat,lit
+
+spark = SparkSession \
+    .builder \
+    .appName("Sample Spark App") \
+    .getOrCreate()
+
+## Create a DataFrame
+data =  spark.createDataFrame([("100", "2015-01-01", "2015-01-01T13:51:39.340396Z"),
+("101",  "2015-01-01", "2015-01-01T12:14:58.597216Z"),
+("102", "2015-01-01", "2015-01-01T13:51:40.417052Z"),
+("103",  "2015-01-01",  "2015-01-01T13:51:40.519832Z")],
+["id", "creation_date",  "last_update_time"])
+
+## Write a DataFrame as a Delta Lake dataset to the S3  location
+spark.sql("""CREATE  TABLE IF NOT EXISTS delta_table (id string, creation_date string,
+last_update_time string)
+USING delta location
+'s3://vasveena-test-demo/delta-lake/db/delta_table'""");
+
+data.writeTo("delta_table").append()
+
+ddf = spark.table("delta_table")
+ddf.show()
+
+
+for EMR on EC2 -
+
+[{
+	"Classification": "delta-defaults",
+	"Properties": {
+		"delta.enabled": "true"
+	}
+}, {
+	"classification": "iceberg-defaults",
+	"properties": {
+		"iceberg.enabled": "true"
+	}
+}]
+
+pyspark --conf "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension" \
+   --conf "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog"
+
+Cloudwatch Metrics & MWAA -> console
+/////////////////////////////////////

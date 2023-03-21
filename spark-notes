@@ -5,9 +5,9 @@ aws s3 rm s3://vasveena-test-demo/spar_output --recursive
 
 RDD:
 
-from pyspark import SparkContext, SparkConf
-conf = SparkConf().setAppName("WordCount")
-sc = SparkContext(conf=conf)
+#from pyspark import SparkContext, SparkConf
+#conf = SparkConf().setAppName("WordCount")
+#sc = SparkContext(conf=conf)
 file = sc.textFile("s3://commoncrawl/crawl-data/CC-MAIN-2017-22/segments/1495463607325.40/wet/")
 counts = file.flatMap(lambda line: line.split(" ")).map(lambda word: (word, 1)).reduceByKey(lambda a, b: a + b)
 counts.saveAsTextFile("s3://vasveena-test-demo/spar_output/")
@@ -29,13 +29,13 @@ supplier2 = supplier.withColumn("test1", when(col("s_acctbal") > 10, "less than 
                     .withColumn("test3", concat(lit("tester"), col("s_name"))) \
                     .withColumn("s_comment", concat(lit(" add to existing comment"), col("s_comment"))) \
                     .withColumn("test4", col("s_nationkey") + 100) \
-                    .withColumn("s_nationkey", col("s_nationkey") + 1000).cache() \
+                    .withColumn("s_nationkey", col("s_nationkey") + 1000).cache()
 
 supplier2.show(5)
 
-aws emr add-steps --cluster-id j-3VZNUJFMRSZD3 --steps Name="Spark Pi Job",Jar=command-runner.jar,Args=[spark-submit,--master,yarn,--conf,spark.executorEnv.YARN_CONTAINER_RUNTIME_TYPE=docker,--conf,spark.executorEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-docker-examples:pyspark-example2,--conf,spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_TYPE=docker,--conf,spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-docker-examples:pyspark-example2,--num-executors,2,--class,org.apache.spark.examples.SparkPi,/usr/lib/spark/examples/jars/spark-examples.jar,10,-v]
+aws emr add-steps --cluster-id j-1W1DQA0I1X27U --steps Name="Spark Pi Job",Jar=command-runner.jar,Args=[spark-submit,--master,yarn,--conf,spark.executorEnv.YARN_CONTAINER_RUNTIME_TYPE=docker,--conf,spark.executorEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-docker-examples:pyspark-example2,--conf,spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_TYPE=docker,--conf,spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-docker-examples:pyspark-example2,--num-executors,2,--class,org.apache.spark.examples.SparkPi,/usr/lib/spark/examples/jars/spark-examples.jar,10,-v] --region us-east-1
 
-spark-submit --master yarn --conf spark.executorEnv.YARN_CONTAINER_RUNTIME_TYPE=docker --conf spark.executorEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=$DOCKER_IMAGE_NAME --conf spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_TYPE=docker --conf spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=$DOCKER_IMAGE_NAME --num-executors 2 --files /etc/spark/conf/log4j.properties,/etc/hadoop/conf/log4j.properties,/etc/hadoop/conf/container-log4j.properties --class org.apache.spark.examples.SparkPi /usr/lib/spark/examples/jars/spark-examples.jar 10 -v
+spark-submit --master yarn --conf spark.executorEnv.YARN_CONTAINER_RUNTIME_TYPE=docker --conf spark.executorEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-docker-examples:pyspark-example2 --conf spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_TYPE=docker --conf spark.yarn.appMasterEnv.YARN_CONTAINER_RUNTIME_DOCKER_IMAGE=620614497509.dkr.ecr.us-east-1.amazonaws.com/emr-docker-examples:pyspark-example2 --num-executors 2 --class org.apache.spark.examples.SparkPi /usr/lib/spark/examples/jars/spark-examples.jar 10 -v
 
 Spark UI
 /////////////////////
@@ -44,11 +44,11 @@ spark-shell
 
 import org.apache.spark.sql.SparkSession
 
-val spark = SparkSession
+/* val spark = SparkSession
   .builder()
   .appName("Dataframes")
   .config("spark.some.config.option", "some-value")
-  .getOrCreate()
+  .getOrCreate() */
 
 val lineitemDF = spark.read.parquet("s3://vasveena-test-vanguard/bigtpcparq/lineitem/")
 val ordersDF = spark.sql("select * from testdb.vanguardparqorders")
@@ -96,7 +96,8 @@ Create Kafka topic
 
 aws kafka get-bootstrap-brokers --cluster-arn arn:aws:kafka:us-east-1:620614497509:cluster/test/2dbb304e-79fe-4beb-a02d-35e0fea4524b-2 | grep BootstrapBrokerString\":
 
-export MTA_API_KEY=UskS0iAsK06DtSffbgqNi8hlDvApPR833wydQAHG
+export MTA_API_KEY=bJTGtW053T8DHxMJYmXe17ZB5zl1sjVdaDxQ4BMG
+export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 
 /home/ec2-user/kafka_2.12-2.2.1/bin/kafka-console-consumer.sh --bootstrap-server "b-3.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:9092,b-1.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:9092,b-2.test.1tklkx.c2.kafka.us-east-1.amazonaws.com:9092" --topic trip_update_topic --from-beginning
 
@@ -106,6 +107,8 @@ python3 train_arrival_producer.py
 
 hdfs dfs -rm -R /user/hadoop/checkpoint
 aws s3 rm s3://vasveena-test-demo/psa_offsite/streaming_output --recursive
+
+spark-shell --conf spark.jars=s3://vasveena-test-demo/jars/reinvent/spark-streaming-kafka-0-10_2.12-3.0.1.jar,s3://vasveena-test-demo/jars/reinvent/spark-streaming-kafka-0-10-assembly_2.12-3.0.1.jar,s3://vasveena-test-demo/jars/reinvent/spark-sql-kafka-0-10_2.12-3.0.1.jar,s3://vasveena-test-demo/jars/reinvent/kafka-clients-2.2.1.jar,s3://vasveena-test-demo/jars/reinvent/commons-pool2-2.11.1.jar
 
 # Run spark streaming kafka consumer program in spark-shell
 
@@ -198,19 +201,30 @@ EMR Studio Execution
 
 aws s3 ls s3://amazon-reviews-pds/parquet/product_category
 
-aws emr --region us-east-1 \
+accountID=$(aws sts get-caller-identity --query "Account" --output text)
+aws s3 ls s3://mrworkshop-$accountID-dayone/studio/best_sellers_output/
+
+accountID=$(aws sts get-caller-identity --query "Account" --output text)
+studio_id=$(/home/ec2-user/.local/bin/aws emr --region us-east-1 list-studios --region us-east-1 --query Studios[*].{Studios:StudioId} --output text)
+studio_s3_location=$(/home/ec2-user/.local/bin/aws emr --region us-east-1 describe-studio --studio-id $studio_id --query 'Studio.DefaultS3Location' --output text)
+studio_notebook_id=$(aws s3 ls $studio_s3_location/e- | sed 's|.*PRE ||g' | sed  's|/||g' | sed  's| ||g')
+cluster_id=$(aws emr list-clusters --region us-east-1 --query 'Clusters[?Name==`EMR-Spark-Hive-Presto` && Status.State!=`TERMINATED`]'.{Clusters:Id} --output text)
+
+notebookExecID=$(/home/ec2-user/.local/bin/aws emr --region us-east-1 \
 start-notebook-execution \
---editor-id e-ADJE4IMLY5B7JA5WSVQKVV3ML \
---notebook-params '{"CATEGORIES":["Furniture","PC"], "FROM_DATE":"2015-08-27", "TO_DATE":"2015-08-31", "OUTPUT_LOCATION": "s3://vasveena-test-demo/mwaa/query_output/"}' \
---relative-path find_best_sellers.ipynb \
+--editor-id $studio_notebook_id \
+--notebook-params "{\"CATEGORIES\":[\"Furniture\",\"PC\"], \"FROM_DATE\":\"2015-08-27\", \"TO_DATE\":\"2015-08-31\", \"OUTPUT_LOCATION\": \"s3://mrworkshop-$accountID-dayone/studio/best_sellers_output_fromapi/\"}" \
+--relative-path workshop-repo/find_best_sellers.ipynb \
 --notebook-execution-name demo-execution \
---execution-engine '{"Id" : "j-3VZNUJFMRSZD3"}' \
---service-role EMR_Notebooks_DefaultRole
+--execution-engine "{\"Id\" : \"${cluster_id}\"}" \
+--service-role emrStudioRole | jq -r .NotebookExecutionId)
 
-aws emr --region us-east-1 describe-notebook-execution --notebook-execution-id ex-J02MM6R6V41FU329HBM837W7KJRY7
+echo $notebookExecID
+
+aws emr --region us-east-1 describe-notebook-execution --notebook-execution-id ex-J05QGRZN5Y48R4Y0UM2C0P1XZPI0Z
 
 aws emr --region us-east-1 \
-describe-notebook-execution --notebook-execution-id ex-J02MSOS7QHM6JQNJTOVK5PG3BCTY2
+describe-notebook-execution --notebook-execution-id 
 
 MWAA:
 
