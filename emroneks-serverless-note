@@ -210,7 +210,7 @@ aws --region us-east-1  emr-serverless create-application \
 
 aws --region us-east-1 emr-serverless start-job-run \
     --name spark-job \
-    --application-id 00f81t6jpt20nt09 \
+    --application-id 00f8t8jsuqug7t09 \
     --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
     --job-driver '{
         "sparkSubmit": {
@@ -263,7 +263,7 @@ aws emr-serverless create-application \
 
  aws --region us-east-1 emr-serverless start-job-run \
      --name graviton-job \
-     --application-id 00f7toaa9hv4b909 \
+     --application-id 00f8t8k8ov39vf09 \
      --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
      --job-driver '{
          "sparkSubmit": {
@@ -300,7 +300,7 @@ aws --region us-east-1  emr-serverless create-application \
 aws emr-serverless start-job-run \
         --name custom-image-java11-job \
         --region us-east-1 \
-        --application-id 00f81tc2v3u46g09 \
+        --application-id 00f8t8n4pbqdai09 \
         --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
         --job-driver '{
             "sparkSubmit": {

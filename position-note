@@ -1,0 +1,295 @@
+EMR Studio Execution
+//////////////////////
+
+Cluster
+Notebook-scoped libraries
+Parameterized notebooks
+Notebooks API
+SQL Explorer
+Collaborators
+
+accountID=$(aws sts get-caller-identity --query "Account" --output text)
+aws s3 ls s3://mrworkshop-$accountID-dayone/studio/best_sellers_output/
+
+aws s3 ls s3://amazon-reviews-pds/parquet/product_category
+
+accountID=$(aws sts get-caller-identity --query "Account" --output text)
+studio_id=$(/home/ec2-user/.local/bin/aws emr --region us-east-1 list-studios --region us-east-1 --query Studios[*].{Studios:StudioId} --output text)
+studio_s3_location=$(/home/ec2-user/.local/bin/aws emr --region us-east-1 describe-studio --studio-id $studio_id --query 'Studio.DefaultS3Location' --output text)
+studio_notebook_id=$(aws s3 ls $studio_s3_location/e- | sed 's|.*PRE ||g' | sed  's|/||g' | sed  's| ||g')
+cluster_id=$(aws emr list-clusters --region us-east-1 --query 'Clusters[?Name==`EMR-Spark-Hive-Presto` && Status.State!=`TERMINATED`]'.{Clusters:Id} --output text)
+
+notebookExecID=$(/home/ec2-user/.local/bin/aws emr --region us-east-1 \
+start-notebook-execution \
+--editor-id $studio_notebook_id \
+--notebook-params "{\"CATEGORIES\":[\"Furniture\",\"PC\"], \"FROM_DATE\":\"2015-08-27\", \"TO_DATE\":\"2015-08-31\", \"OUTPUT_LOCATION\": \"s3://mrworkshop-$accountID-dayone/studio/best_sellers_output_fromapi/\"}" \
+--relative-path workshop-repo/files/notebook/find_best_sellers.ipynb \
+--notebook-execution-name demo-execution \
+--execution-engine "{\"Id\" : \"${cluster_id}\"}" \
+--service-role emrStudioRole | jq -r .NotebookExecutionId)
+
+echo $notebookExecID
+
+aws emr --region us-east-1 \
+start-notebook-execution \
+--editor-id e-ADJE4IMLY5B7JA5WSVQKVV3ML \
+--notebook-params '{"CATEGORIES":["Furniture","PC"], "FROM_DATE":"2015-08-27", "TO_DATE":"2015-08-31", "OUTPUT_LOCATION": "s3://vasveena-test-demo/mwaa/query_output/"}' \
+--relative-path find_best_sellers.ipynb \
+--notebook-execution-name demo-execution \
+--execution-engine '{"Id" : "j-U2EQBRHWSP7P"}' \
+--service-role EMR_Notebooks_DefaultRole
+
+aws emr --region us-east-1 \
+describe-notebook-execution --notebook-execution-id ex-J02M53VETMQJMSCRR9YZCDX2LD0D7
+
+aws emr --region us-east-1 \
+describe-notebook-execution --notebook-execution-id ex-J02LSBA7XAP5WZCIZV01ZZ4KF6ILW
+
+accountID=$(aws sts get-caller-identity --query "Account" --output text)
+aws s3 ls s3://mrworkshop-$accountID-dayone/studio/best_sellers_output_fromapi/
+
+MWAA:
+
+{
+  "airflow_email": "vasveena@amazon.com",
+  "email_on_failure": "true",
+  "email_on_retry": "false"
+}
+
+EMR Serverless
+///////////////
+
+Hive on EMR Serverless
+----------------------
+
+aws emr-serverless delete-application --region us-east-1 --application-id 00evq8mmqicggh09
+
+aws emr-serverless list-applications --region us-east-1
+
+aws --region us-east-1 emr-serverless create-application \
+    --release-label emr-6.10.0 \
+    --initial-capacity '{
+    "DRIVER": {
+        "workerCount": 5,
+        "resourceConfiguration": {
+            "cpu": "2vCPU",
+            "memory": "4GB"
+        }
+    },
+    "TEZ_TASK": {
+        "workerCount": 50,
+        "resourceConfiguration": {
+            "cpu": "4vCPU",
+            "memory": "8GB"
+        }
+    }
+  }' \
+  --maximum-capacity '{
+    "cpu": "400vCPU",
+    "memory": "1024GB"
+  }' \
+  --type 'HIVE' \
+  --name hive-6.10.0-demo-application
+
+aws --region us-east-1 emr-serverless create-application \
+        --release-label emr-6.6.0 \
+        --initial-capacity '{
+        "DRIVER": {
+            "workerCount": 5,
+            "resourceConfiguration": {
+                "cpu": "2vCPU",
+                "memory": "4GB"
+            }
+        },
+        "TEZ_TASK": {
+            "workerCount": 50,
+            "resourceConfiguration": {
+                "cpu": "4vCPU",
+                "memory": "8GB"
+            }
+        }
+      }' \
+      --maximum-capacity '{
+    "cpu": "400vCPU",
+    "memory": "1024GB"
+  }' \
+      --type 'HIVE' \
+      --name hive-6.6.0-demo-application
+
+aws emr-serverless list-applications --region us-east-1
+
+aws --region us-east-1 emr-serverless start-application \
+            --application-id 00f9ap7hfbh2gl09
+
+aws --region us-east-1 emr-serverless start-application \
+            --application-id 00f9ap7rp571so09
+
+aws --region us-east-1 emr-serverless get-application \
+            --application-id 00f9ap7hfbh2gl09
+
+aws --region us-east-1 emr-serverless get-application \
+            --application-id 00f9ap7rp571so09
+
+aws --region us-east-1 emr-serverless start-job-run \
+      --application-id 00f9ap7hfbh2gl09 \
+      --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
+      --job-driver '{
+            "hive": {
+            "query": "s3://vasveena-test-demo/serverless/hive/ql/hive-query.ql",
+            "parameters": "--hiveconf hive.root.logger=DEBUG,DRFA"
+           }
+          }' \
+      --configuration-overrides '{
+            "applicationConfiguration": [{
+            "classification": "hive-site",
+            "properties": {
+                "hive.exec.scratchdir": "s3://vasveena-test-demo/serverless/hive/scratch",
+                "hive.metastore.warehouse.dir": "s3://vasveena-test-demo/serverless/hive/warehouse",
+                "hive.driver.cores": "2",
+                "hive.driver.memory": "4g",
+                "hive.tez.container.size": "4096",
+                "hive.tez.cpu.vcores": "1"
+              }
+            }],
+            "monitoringConfiguration": {
+                "s3MonitoringConfiguration": {
+                "logUri": "s3://vasveena-test-demo/serverless/hive/logs/"
+               }
+              }
+            }'
+
+aws --region us-east-1 emr-serverless start-job-run \
+    --application-id 00f9ap7rp571so09 \
+    --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
+    --job-driver '{
+        "hive": {
+          "query": "s3://vasveena-test-demo/serverless/hive/ql/hive-query.ql",
+          "parameters": "--hiveconf hive.root.logger=DEBUG,DRFA"
+        }
+      }' \
+    --configuration-overrides '{
+        "applicationConfiguration": [{
+          "classification": "hive-site",
+          "properties": {
+            "hive.exec.scratchdir": "s3://vasveena-test-demo/serverless/hive/scratch",
+            "hive.metastore.warehouse.dir": "s3://vasveena-test-demo/serverless/hive/warehouse",
+            "hive.driver.cores": "2",
+            "hive.driver.memory": "4g",
+            "hive.tez.container.size": "4096",
+            "hive.tez.cpu.vcores": "1"
+            }
+          }],
+          "monitoringConfiguration": {
+            "s3MonitoringConfiguration": {
+              "logUri": "s3://vasveena-test-demo/serverless/hive/logs/"
+             }
+            }
+          }'
+
+aws --region us-east-1 emr-serverless get-job-run \
+      --application-id 00f9ap7rp571so09 \
+      --job-run-id 00f9ap97h4sp1g09
+
+aws --region us-east-1 emr-serverless get-job-run \
+      --application-id <appID> \
+      --job-run-id <jobRunID>
+
+aws s3 ls s3://vasveena-test-demo/serverless/hive/logs/applications/00f9ap7rp571so09/jobs/00f9ap97h4sp1g09/
+aws s3 cp s3://vasveena-test-demo/serverless/hive/logs/applications/00f9ap7rp571so09/jobs/00f9ap97h4sp1g09/HIVE_DRIVER/stdout.gz .
+
+Spark on EMR Serverless
+-----------------------
+
+aws emr-serverless list-applications --region us-east-1
+
+aws --region us-east-1 emr-serverless create-application \
+    --release-label emr-6.10.0 \
+    --type 'SPARK' \
+    --initial-capacity '{
+      "DRIVER": {
+          "workerCount": 5,
+          "resourceConfiguration": {
+            "cpu": "2vCPU",
+            "memory": "4GB"
+          }
+      },
+      "EXECUTOR": {
+        "workerCount": 50,
+        "resourceConfiguration": {
+            "cpu": "4vCPU",
+            "memory": "8GB"
+        }
+      }
+    }' \
+    --maximum-capacity '{
+     "cpu": "400vCPU",
+     "memory": "1024GB"
+   }' \
+    --name spark-6.10.0-demo-application
+
+aws --region us-east-1 emr-serverless get-application \
+    --application-id 00f9apaoc6dstr09
+
+aws --region us-east-1 emr-serverless start-application \
+    --application-id 00f9apaoc6dstr09
+
+aws --region us-east-1 emr-serverless start-job-run \
+    --application-id 00f9apaoc6dstr09 \
+    --execution-role-arn arn:aws:iam::620614497509:role/sampleJobExecutionRole \
+    --job-driver '{
+        "sparkSubmit": {
+          "entryPoint": "s3://vasveena-test-demo/samplejobs/tester.py",
+          "entryPointArguments": ["s3://vasveena-test-demo/serverless/output"],
+          "sparkSubmitParameters": "--conf spark.executor.cores=1 --conf spark.executor.memory=4g --conf spark.driver.cores=1 --conf spark.driver.memory=4g --conf spark.executor.instances=1"
+                }
+            }' \
+    --configuration-overrides '{
+          "monitoringConfiguration": {
+            "s3MonitoringConfiguration": {
+              "logUri": "s3://vasveena-test-demo/serverless/logs"
+            }
+          }
+        }'
+
+aws --region us-east-1 emr-serverless get-job-run \
+      --application-id 00f9apaoc6dstr09 \
+      --job-run-id 00f9apb0us6nb909
+
+aws s3 cp s3://vasveena-test-demo/serverless/logs/applications/00f9apaoc6dstr09/jobs/00f9apb0us6nb909/SPARK_DRIVER/stdout.gz .
+
+EMR on EKS
+//////////
+
+aws emr-containers list-virtual-clusters --region us-west-2
+
+aws emr-containers start-job-run \
+--virtual-cluster-id ljvwkokyon5j1x4z649lh65x0 \
+--name 6-10-supplier-job \
+--region us-west-2 \
+--execution-role-arn arn:aws:iam::620614497509:role/EMRContainers-JobExecutionRole \
+--release-label emr-6.10.0-latest \
+--job-driver '{"sparkSubmitJobDriver": {"entryPoint": "s3://vasveena-test-demo/samplejobs/tester.py", "sparkSubmitParameters":"--conf spark.executor.memory=4G --conf spark.executor.instances=4 --conf spark.executor.cores=5 --conf spark.driver.cores=10"}}' \
+--configuration-overrides '{"monitoringConfiguration": {"cloudWatchMonitoringConfiguration": {"logGroupName": "emroneks"}}}'
+
+kubectl get pods -n emroneks-demo --watch
+
+kubectl proxy
+
+http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/#!/login
+
+kubectl -n kube-system describe secret $(kubectl -n kube-system get secret | grep eks-admin | awk '{print $1}')
+
+aws emr-containers start-job-run \
+--virtual-cluster-id ljvwkokyon5j1x4z649lh65x0 \
+--name 5-34-supplier-job \
+--region us-west-2 \
+--execution-role-arn arn:aws:iam::620614497509:role/EMRContainers-JobExecutionRole \
+--release-label emr-5.34.0-latest \
+--job-driver '{"sparkSubmitJobDriver": {"entryPoint": "s3://vasveena-test-demo/samplejobs/tester.py", "sparkSubmitParameters":"--conf spark.executor.memory=4G --conf spark.executor.instances=4 --conf spark.executor.cores=5 --conf spark.driver.cores=10"}}' \
+--configuration-overrides '{"monitoringConfiguration": {"cloudWatchMonitoringConfiguration": {"logGroupName": "emroneks"}}}'
+
+
+EMR on EC2
+//////////
+
+aws emr add-steps --cluster-id j-ITDX7M7L8JZ4 --steps Name='Sample Spark App',Jar=command-runner.jar,Args=['spark-submit','--num-executors','4','--executor-cores','5','--executor-memory','4G','s3://vasveena-test-demo/samplejobs/tester.py'] --region us-east-1

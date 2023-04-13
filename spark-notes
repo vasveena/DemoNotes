@@ -224,7 +224,7 @@ echo $notebookExecID
 aws emr --region us-east-1 describe-notebook-execution --notebook-execution-id ex-J05QGRZN5Y48R4Y0UM2C0P1XZPI0Z
 
 aws emr --region us-east-1 \
-describe-notebook-execution --notebook-execution-id 
+describe-notebook-execution --notebook-execution-id ex-J05QF74U3Z2WDHAMX8KUN5NWXO4HE
 
 MWAA:
 
